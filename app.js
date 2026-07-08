@@ -350,7 +350,7 @@ function stampFor(status) {
 }
 
 function findMaterial(materialId) {
-  return (STATE.materials || []).find(m => m.materialId === materialId);
+  return getValidMaterials().find(m => m.materialId === materialId);
 }
 
 // ===================================================================
@@ -411,8 +411,17 @@ function kpiCard(label, value) {
 // MATERIALS
 // ===================================================================
 
+function getValidMaterials() {
+  // Defensive filter: the materials source can include blank/empty rows
+  // (e.g. formatted-but-empty rows in the backing sheet). Only keep rows
+  // that actually have a material ID and name.
+  return (STATE.materials || []).filter(m =>
+    m && String(m.materialId || '').trim() !== '' && String(m.materialName || '').trim() !== ''
+  );
+}
+
 function viewMaterials() {
-  const rows = (STATE.materials || []).map(m => {
+  const rows = getValidMaterials().map(m => {
     const available = (m.availableStock !== undefined && m.availableStock !== '')
       ? m.availableStock
       : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
@@ -725,7 +734,7 @@ function viewNewRequestForm() {
         <div class="field">
           <span class="field-label">Shop ID</span>
           <div class="field-row">
-            <input id="nrShopId" placeholder="e.g. 17004327">
+            <input id="nrShopId" placeholder="e.g. PH003980">
             <button type="button" class="btn btn-secondary btn-sm" id="nrLookupBtn">Lookup</button>
           </div>
         </div>
@@ -790,7 +799,7 @@ function bindNewRequestForm() {
 
 function addNewRequestItemRow(container) {
   const rowId = `nrItem${itemRowSeq++}`;
-  const activeMaterials = (STATE.materials || []).filter(m => (m.status || 'Active') === 'Active');
+  const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
   const row = document.createElement('div');
   row.className = 'item-row';
   row.id = rowId;
