@@ -76,6 +76,10 @@ function bindThemeToggles() {
 
 function bindLoginForm() {
   const form = document.getElementById('loginForm');
+
+  document.getElementById('forgotPinBtn').addEventListener('click', () => {
+    document.getElementById('loginError').textContent = 'Contact your Admin to reset your PIN.';
+  });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const userId = document.getElementById('loginUserId').value.trim();
