@@ -438,7 +438,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .field textarea { min-height: 76px; }
 .field input:disabled { opacity: 0.6; cursor: not-allowed; }
 .field-row { display: flex; gap: 8px; align-items: flex-end; }
-.field-row .field { flex: 1; }
+.field-row input { flex: 1; min-width: 0; }
 
 .form-grid {
   display: grid;
