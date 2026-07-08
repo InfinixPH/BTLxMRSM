@@ -122,25 +122,31 @@ function enterApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('appShell').classList.remove('hidden');
 
-  renderUserBadge();
-  renderSidebarNav();
+  try {
+    renderUserBadge();
+    renderSidebarNav();
 
-  // 1. INSTANT LOAD: paint whatever we cached last session immediately.
-  const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    STATE = JSON.parse(cached);
-    renderView(currentView);
-  } else {
-    renderView(currentView); // renders skeleton/empty states
+    // 1. INSTANT LOAD: paint whatever we cached last session immediately.
+    const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      STATE = JSON.parse(cached);
+      renderView(currentView);
+    } else {
+      renderView(currentView); // renders skeleton/empty states
+    }
+
+    // 2. BACKGROUND REFRESH: fetch real data without blocking the UI.
+    refreshBootstrap(cacheKey);
+
+    // 3. POLLING: cheap timestamp check to know when to pull fresh data.
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
+  } catch (err) {
+    console.error('enterApp failed:', err);
+    document.getElementById('content').innerHTML =
+      `<div class="page-header"><h1 class="page-title">Something went wrong</h1></div><p class="empty-state">${err.message}</p>`;
   }
-
-  // 2. BACKGROUND REFRESH: fetch real data without blocking the UI.
-  refreshBootstrap(cacheKey);
-
-  // 3. POLLING: cheap timestamp check to know when to pull fresh data.
-  clearInterval(pollTimer);
-  pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
 }
 
 async function refreshBootstrap(cacheKey) {
@@ -191,7 +197,7 @@ function renderUserBadge() {
 }
 
 function initials(name) {
-  return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+  return String(name || '?').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
 function renderSidebarNav() {
