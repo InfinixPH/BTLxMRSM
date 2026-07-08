@@ -131,37 +131,53 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .login-form { display: flex; flex-direction: column; gap: 16px; }
 
-.field { display: flex; flex-direction: column; gap: 6px; }
+.field { display: flex; flex-direction: column; gap: 7px; }
 .field-label {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 .field input {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 11px 12px;
+  border-radius: 10px;
+  padding: 13px 14px;
   font-size: 14px;
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.12s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.field input:focus { border-color: var(--accent); }
+.field input::placeholder { color: var(--text-muted); }
+.field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 
 .btn {
-  border-radius: var(--radius-sm);
-  padding: 11px 18px;
-  font-size: 14px;
+  border-radius: 10px;
+  padding: 13px 18px;
+  font-size: 14.5px;
   font-weight: 600;
   transition: filter 0.12s ease, transform 0.05s ease;
 }
 .btn:active { transform: translateY(1px); }
-.btn-primary { background: var(--accent); color: #0A1413; }
-.btn-primary:hover { filter: brightness(1.08); }
-.btn-block { width: 100%; margin-top: 6px; }
+.btn-primary {
+  background: linear-gradient(90deg, #4F46E5 0%, #7C6CF0 100%);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(79,70,229,0.3);
+}
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-block { width: 100%; margin-top: 8px; }
+
+.login-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.link-btn { color: #6D5DF0; font-weight: 600; }
+.link-btn:hover { text-decoration: underline; }
+.login-hint { color: var(--text-muted); }
 .btn-secondary { background: var(--surface-hover); color: var(--text-primary); border: 1px solid var(--border); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-ghost { background: transparent; color: var(--text-secondary); }
