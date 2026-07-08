@@ -101,6 +101,22 @@
   </main>
 </div>
 
+<!-- ============ GENERIC MODAL ============ -->
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal" id="modalBox">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle"></h2>
+      <button class="icon-btn" id="modalCloseBtn" aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ============ TOASTS ============ -->
+<div class="toast-stack" id="toastStack"></div>
+
 <script src="config.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
