@@ -417,3 +417,138 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ===================================================================
+   FORM CONTROLS (select / textarea share .field input styling)
+=================================================================== */
+
+.field select, .field textarea {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.field textarea { min-height: 76px; }
+.field input:disabled { opacity: 0.6; cursor: not-allowed; }
+.field-row { display: flex; gap: 8px; align-items: flex-end; }
+.field-row .field { flex: 1; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.form-grid .field.span-2 { grid-column: span 2; }
+@media (max-width: 640px) { .form-grid .field.span-2 { grid-column: span 1; } }
+
+.form-actions { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+.form-note { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+/* ===================================================================
+   ITEM ROW REPEATER (New Request material lines)
+=================================================================== */
+
+.item-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 36px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.item-row select, .item-row input { width: 100%; }
+.item-row-remove {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.item-row-remove:hover { background: var(--red-dim); color: var(--red); }
+.item-row-remove svg { width: 16px; height: 16px; }
+
+/* ===================================================================
+   TABLE ACTIONS / MISC
+=================================================================== */
+
+.table-wrap { overflow-x: auto; }
+table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data-table th { text-align: left; padding: 8px; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); }
+table.data-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.data-table tbody tr:hover { background: var(--surface-hover); }
+table.data-table tbody tr.clickable { cursor: pointer; }
+
+.action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar-search {
+  flex: 1; max-width: 320px; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 12px; color: var(--text-muted);
+}
+.toolbar-search input { border: none; outline: none; background: transparent; color: var(--text-primary); font-size: 13.5px; width: 100%; }
+
+/* ===================================================================
+   MODAL
+=================================================================== */
+
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 560px; max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--surface); z-index: 1;
+}
+.modal-title { font-family: var(--font-display); font-size: 17px; font-weight: 700; }
+.modal-body { padding: 22px; }
+
+/* ===================================================================
+   TOASTS
+=================================================================== */
+
+.toast-stack {
+  position: fixed; bottom: 20px; right: 20px; z-index: 60;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm); padding: 12px 16px;
+  font-size: 13px; box-shadow: var(--shadow-pop);
+  max-width: 320px; animation: toast-in 0.15s ease;
+}
+.toast.toast-error { border-left-color: var(--red); }
+.toast.toast-success { border-left-color: var(--green); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===================================================================
+   TIMELINE (Request detail)
+=================================================================== */
+
+.timeline { display: flex; flex-direction: column; gap: 14px; margin-top: 6px; }
+.timeline-item { display: flex; gap: 12px; }
+.timeline-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+.timeline-content { font-size: 13px; }
+.timeline-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.section-title { font-size: 14px; font-weight: 600; margin: 22px 0 12px; }
+.section-title:first-child { margin-top: 0; }
