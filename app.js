@@ -1,600 +1,1189 @@
 /**
- * BTL x MRMS — BACKEND API (Code.gs)
- * -----------------------------------------------------------------
- * Deployed as a Web App (Deploy > New deployment > Web app).
- *   - Execute as: Me
- *   - Who has access: Anyone
- *
- * FRONTEND CALLING CONVENTION (important — read this):
- *   GET  requests -> doGet(e)  -> use for all READS. Pass ?action=xxx&...params
- *   POST requests -> doPost(e) -> use for all WRITES. Body must be sent as
- *                     Content-Type: text/plain (NOT application/json) with a
- *                     JSON string as the body, e.g.:
- *
- *     fetch(WEB_APP_URL, {
- *       method: 'POST',
- *       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
- *       body: JSON.stringify({ action: 'submitRequest', ...payload })
- *     });
- *
- *   Why: Apps Script Web Apps don't handle CORS preflight (OPTIONS).
- *   Sending as text/plain keeps it a "simple request" so the browser
- *   skips preflight entirely. If you send application/json, cross-origin
- *   calls from GitHub Pages will silently fail.
- * -----------------------------------------------------------------
+ * BTL x MRMS — APP
+ * Handles: login/session, instant load from cache + background refresh,
+ * polling-based sync, theme toggle, sidebar nav, notification panel,
+ * view routing, and every page (dashboard, materials, requests + detail,
+ * new request form, approval windows, activity log, users, settings).
  */
 
-const SS = SpreadsheetApp.getActiveSpreadsheet();
-
-const SHEETS = {
-  STORE_LIST: 'STORE DETAILS',
-  PERSONEL_LIST: 'PERSONEL LIST',
-  MATERIALS: 'MATERIALS',
-  REQUESTS: 'REQUESTS',
-  REQUEST_ITEMS: 'REQUEST ITEMS',
-  APPROVAL_WINDOWS: 'APPROVAL WINDOWS',
-  ACTIVITY_LOG: 'ACTIVITY LOG',
-  REQUEST_TIMELINE: 'REQUEST TIMELINE',
-  NOTIFICATIONS: 'NOTIFICATIONS',
-  CONFIG: 'CONFIG'
+let SESSION = null;       // { userId, fullName, role, region }
+let STATE = {              // in-memory app data, hydrated from cache then network
+  materials: [],
+  requests: [],
+  notifications: [],
+  approvalWindows: [],
+  lastUpdate: null
 };
+let currentView = 'dashboard';
+let pollTimer = null;
+let itemRowSeq = 0;
 
-const ROLES = {
-  ADMIN: 'ADMIN',
-  BTL_MANAGER: 'BTL MANAGER',
-  BTL_ETHAN: 'BTL ETHAN',
-  BTL_JB: 'BTL JB',
-  WAREHOUSE: 'WAREHOUSE',
-  RSS: 'RSS',
-  RSH: 'RSH',
-  OTHERS: 'OTHERS'
-};
-
-const BTL_ROLES = [ROLES.BTL_MANAGER, ROLES.BTL_ETHAN, ROLES.BTL_JB];
+const REQUEST_TYPES = ['Regular Replenishment', 'New Store Setup', 'Damage Replacement', 'Special Request'];
 
 // ===================================================================
-// ROUTER
+// ICONS (inline, keeps this dependency-free)
+// ===================================================================
+const ICONS = {
+  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+  box: '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+  users: '<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.33 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.33 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.33-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  trash: '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z"/>',
+  edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>'
+};
+
+// ===================================================================
+// INIT
 // ===================================================================
 
-function doGet(e) {
-  try {
-    const action = e.parameter.action;
-    let result;
-    switch (action) {
-      case 'ping': result = { ok: true, time: new Date().toISOString() }; break;
-      case 'getLastUpdate': result = handleGetLastUpdate(); break;
-      case 'getBootstrap': result = handleGetBootstrap(e.parameter); break;
-      case 'lookupShop': result = handleLookupShop(e.parameter); break;
-      case 'getRequests': result = handleGetRequests(e.parameter); break;
-      case 'getRequestDetail': result = handleGetRequestDetail(e.parameter); break;
-      case 'getNotifications': result = handleGetNotifications(e.parameter); break;
-      case 'getMaterials': result = handleGetMaterials(); break;
-      case 'getActivityLog': result = handleGetActivityLog(e.parameter); break;
-      case 'getPersonnel': result = handleGetPersonnel(); break;
-      default: throw new Error('Unknown GET action: ' + action);
-    }
-    return jsonOut_({ success: true, data: result });
-  } catch (err) {
-    return jsonOut_({ success: false, error: err.message });
+document.addEventListener('DOMContentLoaded', () => {
+  applyStoredTheme();
+  bindThemeToggles();
+  bindLoginForm();
+  bindSidebarToggle();
+  bindNotifPanel();
+  bindModal();
+
+  const stored = localStorage.getItem(CONFIG.STORAGE_KEYS.SESSION);
+  if (stored) {
+    SESSION = JSON.parse(stored);
+    enterApp();
   }
+});
+
+// ===================================================================
+// THEME
+// ===================================================================
+
+function applyStoredTheme() {
+  const saved = localStorage.getItem(CONFIG.STORAGE_KEYS.THEME) || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
 }
 
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents);
-    const action = body.action;
-    let result;
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem(CONFIG.STORAGE_KEYS.THEME, next);
+}
 
-    const lock = LockService.getScriptLock();
-    lock.waitLock(10000);
+function bindThemeToggles() {
+  document.getElementById('themeToggleLogin').addEventListener('click', toggleTheme);
+  document.getElementById('themeToggleApp').addEventListener('click', toggleTheme);
+}
+
+// ===================================================================
+// LOGIN / SESSION
+// ===================================================================
+
+function bindLoginForm() {
+  const form = document.getElementById('loginForm');
+
+  document.getElementById('forgotPinBtn').addEventListener('click', () => {
+    document.getElementById('loginError').textContent = 'Contact your Admin to reset your PIN.';
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const userId = document.getElementById('loginUserId').value.trim();
+    const pin = document.getElementById('loginPin').value.trim();
+    const errorEl = document.getElementById('loginError');
+    const btn = document.getElementById('loginBtn');
+
+    errorEl.textContent = '';
+    btn.textContent = 'Logging in...';
+    btn.disabled = true;
+
     try {
-      switch (action) {
-        case 'login': result = handleLogin(body); break;
-        case 'submitRequest': result = handleSubmitRequest(body); break;
-        case 'reviewRequestItem': result = handleReviewRequestItem(body); break;
-        case 'finalizeRequestReview': result = handleFinalizeRequestReview(body); break;
-        case 'releaseRequest': result = handleReleaseRequest(body); break;
-        case 'markNotificationRead': result = handleMarkNotificationRead(body); break;
-        case 'resetPin': result = handleResetPin(body); break;
-        case 'createApprovalWindow': result = handleCreateApprovalWindow(body); break;
-        case 'upsertMaterial': result = handleUpsertMaterial(body); break;
-        case 'upsertPersonnel': result = handleUpsertPersonnel(body); break;
-        default: throw new Error('Unknown POST action: ' + action);
-      }
+      const user = await Api.login(userId, pin);
+      SESSION = user;
+      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION, JSON.stringify(user));
+      enterApp();
+    } catch (err) {
+      errorEl.textContent = err.message;
     } finally {
-      lock.releaseLock();
+      btn.textContent = 'Log In';
+      btn.disabled = false;
     }
+  });
+}
 
-    return jsonOut_({ success: true, data: result });
+function logout() {
+  clearInterval(pollTimer);
+  localStorage.removeItem(CONFIG.STORAGE_KEYS.SESSION);
+  SESSION = null;
+  document.getElementById('appShell').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('loginForm').reset();
+}
+
+// ===================================================================
+// APP ENTRY — instant load from cache, then background refresh + polling
+// ===================================================================
+
+function enterApp() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('appShell').classList.remove('hidden');
+
+  try {
+    renderUserBadge();
+    renderSidebarNav();
+
+    const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      STATE = JSON.parse(cached);
+    }
+    renderView(currentView);
+
+    refreshBootstrap(cacheKey);
+
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
   } catch (err) {
-    return jsonOut_({ success: false, error: err.message });
+    console.error('enterApp failed:', err);
+    document.getElementById('content').innerHTML =
+      `<div class="page-header"><h1 class="page-title">Something went wrong</h1></div><p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
 }
 
-function jsonOut_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+async function refreshBootstrap(cacheKey) {
+  setSyncStatus('syncing');
+  try {
+    const data = await Api.getBootstrap(SESSION.role, SESSION.userId);
+    STATE = data;
+    localStorage.setItem(cacheKey, JSON.stringify(data));
+    renderView(currentView);
+    renderNotifications();
+    setSyncStatus('synced');
+  } catch (err) {
+    console.error('Bootstrap refresh failed:', err);
+    setSyncStatus('offline');
+  }
+}
+
+async function checkForUpdates(cacheKey) {
+  try {
+    const { lastUpdate } = await Api.getLastUpdate();
+    if (lastUpdate && lastUpdate !== STATE.lastUpdate) {
+      await refreshBootstrap(cacheKey);
+    } else {
+      setSyncStatus('synced');
+    }
+  } catch (err) {
+    setSyncStatus('offline');
+  }
+}
+
+function setSyncStatus(status) {
+  const dot = document.querySelector('.sync-dot');
+  const text = document.getElementById('syncText');
+  dot.classList.remove('syncing', 'offline');
+  if (status === 'syncing') { dot.classList.add('syncing'); text.textContent = 'Syncing...'; }
+  else if (status === 'offline') { dot.classList.add('offline'); text.textContent = 'Offline'; }
+  else { text.textContent = 'Synced'; }
 }
 
 // ===================================================================
-// SHEET HELPERS
+// ROLE HELPERS
 // ===================================================================
 
-function getSheet_(name) {
-  const sheet = SS.getSheetByName(name);
-  if (!sheet) throw new Error('Sheet not found: ' + name);
-  return sheet;
+function isAdmin() { return SESSION.role === ROLES.ADMIN; }
+function isBTL() { return BTL_ROLES.indexOf(SESSION.role) !== -1; }
+function isWarehouse() { return SESSION.role === ROLES.WAREHOUSE; }
+function canReviewRequests() { return isAdmin() || isBTL(); }
+function canReleaseRequests() { return isAdmin() || isWarehouse(); }
+
+// ===================================================================
+// SIDEBAR
+// ===================================================================
+
+function renderUserBadge() {
+  document.getElementById('userAvatar').textContent = initials(SESSION.fullName || SESSION.userId);
+  document.getElementById('userName').textContent = SESSION.fullName || SESSION.userId;
+  document.getElementById('userRole').textContent = SESSION.role;
 }
 
-function toCamel_(header) {
-  return header.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, c) => c.toUpperCase());
+function initials(name) {
+  return String(name || '?').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
-function getHeaders_(sheet) {
-  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+function renderSidebarNav() {
+  const nav = document.getElementById('sidebarNav');
+  const items = getNavGroupForRole(SESSION.role);
+  nav.innerHTML = items.map(item => `
+    <button class="nav-item ${item.id === currentView ? 'active' : ''}" data-view="${item.id}">
+      <svg>${ICONS[item.icon] || ICONS.grid}</svg>
+      <span class="nav-label">${item.label}</span>
+    </button>
+  `).join('');
+
+  nav.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentView = btn.dataset.view;
+      nav.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderView(currentView);
+    });
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', logout);
 }
 
-/** Reads all data rows into an array of {camelKey: value} objects. Includes _row (1-indexed sheet row) for updates. */
-function sheetToObjects_(sheet) {
-  const headers = getHeaders_(sheet);
-  const camelHeaders = headers.map(toCamel_);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  return values
-    .map((row, i) => {
-      const obj = { _row: i + 2 };
-      camelHeaders.forEach((key, idx) => obj[key] = row[idx]);
-      return obj;
-    })
-    // Skip fully blank rows. IMPORTANT: _row is always a number, so it must be
-    // excluded from this check — otherwise it always evaluates truthy and every
-    // row (including empty/formatted-only trailing rows past your real data)
-    // passes through, which is what was flooding Materials/Requests/etc. with
-    // hundreds of blank entries.
-    .filter(obj => Object.keys(obj).some(k => k !== '_row' && obj[k] !== '' && obj[k] !== null));
+function bindSidebarToggle() {
+  document.getElementById('sidebarToggle').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('collapsed');
+  });
 }
 
-/** Appends a record. obj keys must be camelCase matching headers. Missing keys become ''. */
-function appendRecord_(sheet, obj) {
-  const headers = getHeaders_(sheet);
-  const camelHeaders = headers.map(toCamel_);
-  const row = camelHeaders.map(key => obj[key] !== undefined ? obj[key] : '');
-  sheet.appendRow(row);
-  return sheet.getLastRow();
+// ===================================================================
+// NOTIFICATIONS
+// ===================================================================
+
+function bindNotifPanel() {
+  const btn = document.getElementById('notifBtn');
+  const panel = document.getElementById('notifPanel');
+  btn.addEventListener('click', () => panel.classList.toggle('hidden'));
+  document.addEventListener('click', (e) => {
+    if (!panel.contains(e.target) && !btn.contains(e.target)) panel.classList.add('hidden');
+  });
 }
 
-/** Updates specific fields on a given row number. fields keyed by camelCase. */
-function updateRecordFields_(sheet, rowNumber, fields) {
-  const headers = getHeaders_(sheet);
-  const camelHeaders = headers.map(toCamel_);
-  Object.keys(fields).forEach(key => {
-    const colIndex = camelHeaders.indexOf(key);
-    if (colIndex !== -1) {
-      sheet.getRange(rowNumber, colIndex + 1).setValue(fields[key]);
+function renderNotifications() {
+  const list = STATE.notifications || [];
+  const unread = list.filter(n => n.readStatus === 'Unread');
+  const badge = document.getElementById('notifBadge');
+  badge.textContent = unread.length;
+  badge.classList.toggle('hidden', unread.length === 0);
+
+  const container = document.getElementById('notifList');
+  if (!list.length) {
+    container.innerHTML = '<p class="empty-state">No notifications yet.</p>';
+    return;
+  }
+  container.innerHTML = list.slice().reverse().map(n => `
+    <div class="notif-item ${n.readStatus === 'Unread' ? 'unread' : ''}" data-id="${n.notificationId}">
+      <div>${escapeHtml(n.message)}</div>
+      <div class="notif-item-time">${formatDate(n.createdAt)}</div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.notif-item').forEach(el => {
+    el.addEventListener('click', async () => {
+      try {
+        await Api.markNotificationRead(el.dataset.id);
+        el.classList.remove('unread');
+        const n = list.find(x => x.notificationId === el.dataset.id);
+        if (n) n.readStatus = 'Read';
+        renderNotifications();
+        if (n && n.relatedRequestId) openRequestDetail(n.relatedRequestId);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  });
+}
+
+// ===================================================================
+// TOASTS
+// ===================================================================
+
+function toast(message, type) {
+  const stack = document.getElementById('toastStack');
+  const el = document.createElement('div');
+  el.className = `toast ${type === 'error' ? 'toast-error' : type === 'success' ? 'toast-success' : ''}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ===================================================================
+// MODAL
+// ===================================================================
+
+function bindModal() {
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('modalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'modalOverlay') closeModal();
+  });
+}
+
+function openModal(title, bodyHtml) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.add('hidden');
+  document.getElementById('modalBody').innerHTML = '';
+}
+
+// ===================================================================
+// SMALL UTILS
+// ===================================================================
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function formatDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (isNaN(d)) return String(value);
+  return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
+}
+
+function stampFor(status) {
+  const map = {
+    'Pending': 'stamp-pending', 'Approved': 'stamp-approved', 'Rejected': 'stamp-rejected',
+    'Need Clarification': 'stamp-clarify', 'Completed': 'stamp-completed', 'Released': 'stamp-completed'
+  };
+  return `<span class="stamp ${map[status] || 'stamp-pending'}">${escapeHtml(status || 'Pending')}</span>`;
+}
+
+function findMaterial(materialId) {
+  return getValidMaterials().find(m => m.materialId === materialId);
+}
+
+// ===================================================================
+// VIEW ROUTING
+// ===================================================================
+
+function renderView(view) {
+  const content = document.getElementById('content');
+  switch (view) {
+    case 'dashboard': content.innerHTML = viewDashboard(); bindDashboard(); break;
+    case 'materials': content.innerHTML = viewMaterials(); bindMaterials(); break;
+    case 'requests': content.innerHTML = viewRequests(); bindRequestRowClicks(content); break;
+    case 'newRequest': content.innerHTML = viewNewRequestForm(); bindNewRequestForm(); break;
+    case 'approvalWindows': content.innerHTML = viewApprovalWindows(); bindApprovalWindows(); break;
+    case 'activityLog': content.innerHTML = viewActivityLogShell(); loadActivityLog(); break;
+    case 'users': content.innerHTML = viewUsersShell(); loadUsers(); break;
+    case 'settings': content.innerHTML = viewSettings(); bindSettings(); break;
+    default: content.innerHTML = '';
+  }
+}
+
+// ===================================================================
+// DASHBOARD
+// ===================================================================
+
+function viewDashboard() {
+  const total = STATE.requests.length;
+  const pending = STATE.requests.filter(r => r.overallStatus === 'Pending').length;
+  const approved = STATE.requests.filter(r => r.overallStatus === 'Approved').length;
+  const completed = STATE.requests.filter(r => r.overallStatus === 'Completed').length;
+
+  return `
+    <div class="page-header">
+      <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Welcome back, ${escapeHtml(SESSION.fullName || SESSION.userId)}</p></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
+      ${kpiCard('Total Requests', total)}
+      ${kpiCard('Pending', pending)}
+      ${kpiCard('Approved', approved)}
+      ${kpiCard('Completed', completed)}
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3 style="font-size:14px;margin-bottom:12px;">Recent Requests</h3>
+      ${renderRequestRows(STATE.requests.slice(-8).reverse())}
+    </div>
+  `;
+}
+
+function bindDashboard() {
+  bindRequestRowClicks(document.getElementById('content'));
+}
+
+function kpiCard(label, value) {
+  return `<div class="card"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${label}</div><div style="font-family:var(--font-display);font-size:26px;font-weight:700;">${value}</div></div>`;
+}
+
+// ===================================================================
+// MATERIALS
+// ===================================================================
+
+function getValidMaterials() {
+  // Defensive filter: the materials source can include blank/empty rows
+  // (e.g. formatted-but-empty rows in the backing sheet). Only keep rows
+  // that actually have a material ID and name.
+  return (STATE.materials || []).filter(m =>
+    m && String(m.materialId || '').trim() !== '' && String(m.materialName || '').trim() !== ''
+  );
+}
+
+function viewMaterials() {
+  const rows = getValidMaterials().map(m => {
+    const available = (m.availableStock !== undefined && m.availableStock !== '')
+      ? m.availableStock
+      : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
+    return `
+      <tr>
+        <td class="mono">${escapeHtml(m.materialId)}</td>
+        <td>${escapeHtml(m.materialName)}</td>
+        <td>${escapeHtml(m.category)}</td>
+        <td>${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
+        <td>${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
+        <td>${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
+        <td>${escapeHtml(m.status || 'Active')}</td>
+        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}">Edit</button></td>` : ''}
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div class="page-header">
+      <h1 class="page-title">Materials & Inventory</h1>
+      ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="matAddBtn">+ Add Material</button>` : ''}
+    </div>
+    <div class="card table-wrap">
+      <table class="data-table">
+        <thead><tr>
+          <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty-state">No materials yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function bindMaterials() {
+  if (!isAdmin()) return;
+  const addBtn = document.getElementById('matAddBtn');
+  if (addBtn) addBtn.addEventListener('click', () => openMaterialModal(null));
+  document.querySelectorAll('.mat-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => openMaterialModal(findMaterial(btn.dataset.id)));
+  });
+}
+
+function openMaterialModal(material) {
+  const isEdit = !!material;
+  openModal(isEdit ? 'Edit Material' : 'Add Material', `
+    <div class="form-grid">
+      <div class="field"><span class="field-label">Category</span><input id="matCategory" value="${escapeHtml(material?.category || '')}"></div>
+      <div class="field"><span class="field-label">Material Name</span><input id="matName" value="${escapeHtml(material?.materialName || '')}"></div>
+      <div class="field"><span class="field-label">Unit</span><input id="matUnit" value="${escapeHtml(material?.unit || '')}" placeholder="pcs, box, roll..."></div>
+      <div class="field"><span class="field-label">Current Stock</span><input id="matStock" type="number" value="${escapeHtml(material?.currentStock ?? 0)}"></div>
+      <div class="field"><span class="field-label">Reorder Level</span><input id="matReorder" type="number" value="${escapeHtml(material?.reorderLevel ?? 0)}"></div>
+      <div class="field">
+        <span class="field-label">Status</span>
+        <select id="matStatus">
+          <option value="Active" ${material?.status === 'Active' || !material ? 'selected' : ''}>Active</option>
+          <option value="Inactive" ${material?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+        </select>
+      </div>
+    </div>
+    <p class="login-error" id="matModalError"></p>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="matSaveBtn">${isEdit ? 'Save Changes' : 'Add Material'}</button>
+      <button class="btn btn-ghost" id="matCancelBtn">Cancel</button>
+    </div>
+  `);
+
+  document.getElementById('matCancelBtn').addEventListener('click', closeModal);
+  document.getElementById('matSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('matModalError');
+    const payload = {
+      materialId: material ? material.materialId : '',
+      category: document.getElementById('matCategory').value.trim(),
+      materialName: document.getElementById('matName').value.trim(),
+      unit: document.getElementById('matUnit').value.trim(),
+      currentStock: Number(document.getElementById('matStock').value || 0),
+      reorderLevel: Number(document.getElementById('matReorder').value || 0),
+      status: document.getElementById('matStatus').value,
+      actorUserId: SESSION.userId
+    };
+    if (!payload.materialName || !payload.unit) {
+      errorEl.textContent = 'Material name and unit are required.';
+      return;
+    }
+    try {
+      await Api.upsertMaterial(payload);
+      closeModal();
+      toast('Material saved.', 'success');
+      refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
+    } catch (err) {
+      errorEl.textContent = err.message;
     }
   });
 }
 
-function findRowById_(sheet, idKey, idValue) {
-  const records = sheetToObjects_(sheet);
-  const target = String(idValue).trim().toLowerCase();
-  return records.find(r => String(r[idKey]).trim().toLowerCase() === target) || null;
+// ===================================================================
+// REQUESTS LIST + DETAIL
+// ===================================================================
+
+function viewRequests() {
+  return `
+    <div class="page-header"><h1 class="page-title">Requests</h1></div>
+    <div class="card table-wrap">${renderRequestRows(STATE.requests.slice().reverse())}</div>
+  `;
 }
 
-function genId_(prefix) {
-  return prefix + '-' + Utilities.getUuid().split('-')[0].toUpperCase();
+function renderRequestRows(requests) {
+  if (!requests.length) return `<p class="empty-state">No requests yet.</p>`;
+  return `
+    <table class="data-table">
+      <thead><tr>
+        <th>Request ID</th><th>Store</th><th>Type</th><th>Status</th><th>Submitted</th>
+      </tr></thead>
+      <tbody>
+        ${requests.map(r => `
+          <tr class="clickable" data-request-id="${escapeHtml(r.requestId)}">
+            <td class="mono">${escapeHtml(r.requestId)}</td>
+            <td>${escapeHtml(r.storeName)}</td>
+            <td>${escapeHtml(r.requestType)}</td>
+            <td>${stampFor(r.overallStatus)}</td>
+            <td>${formatDate(r.timestamp)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
-function bumpLastUpdate_() {
-  const sheet = getSheet_(SHEETS.CONFIG);
-  const records = sheetToObjects_(sheet);
-  const row = records.find(r => r.key === 'LAST_DATA_UPDATE');
-  if (row) {
-    updateRecordFields_(sheet, row._row, { value: new Date().getTime().toString() });
+function bindRequestRowClicks(scope) {
+  scope.querySelectorAll('tr[data-request-id]').forEach(row => {
+    row.addEventListener('click', () => openRequestDetail(row.dataset.requestId));
+  });
+}
+
+async function openRequestDetail(requestId) {
+  openModal(requestId, `<p class="empty-state">Loading...</p>`);
+  try {
+    const detail = await Api.getRequestDetail(requestId);
+    renderRequestDetailModal(detail);
+  } catch (err) {
+    document.getElementById('modalBody').innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
 }
 
-function getConfigValue_(key) {
-  const records = sheetToObjects_(getSheet_(SHEETS.CONFIG));
-  const row = records.find(r => r.key === key);
-  return row ? row.value : null;
-}
-
-function logActivity_(userId, role, action, targetType, targetId, details) {
-  appendRecord_(getSheet_(SHEETS.ACTIVITY_LOG), {
-    logId: genId_('LOG'),
-    timestamp: new Date(),
-    userId, role, action, targetType, targetId,
-    details: details || ''
-  });
-}
-
-function addTimelineEntry_(requestId, stage, actorUserId, action, remarks) {
-  appendRecord_(getSheet_(SHEETS.REQUEST_TIMELINE), {
-    timelineId: genId_('TML'),
-    requestId, stage, actorUserId, action,
-    remarks: remarks || '',
-    timestamp: new Date()
-  });
-}
-
-function addNotification_(userId, type, message, relatedRequestId) {
-  appendRecord_(getSheet_(SHEETS.NOTIFICATIONS), {
-    notificationId: genId_('NOTIF'),
-    userId, type, message,
-    relatedRequestId: relatedRequestId || '',
-    readStatus: 'Unread',
-    createdAt: new Date()
-  });
-}
-
-// ===================================================================
-// AUTH
-// ===================================================================
-
-function handleLogin(body) {
-  const { rssUserId, pin } = body;
-  if (!rssUserId || !pin) throw new Error('Missing user ID or PIN.');
-
-  const sheet = getSheet_(SHEETS.PERSONEL_LIST);
-  const user = findRowById_(sheet, 'rssUserId', rssUserId);
-  if (!user) throw new Error('User not found.');
-  if (user.pinStatus && String(user.pinStatus).toLowerCase() === 'locked') {
-    throw new Error('Account locked. Contact an admin.');
+function renderRequestDetailModal(detail) {
+  const { request, items, timeline } = detail;
+  if (!request) {
+    document.getElementById('modalBody').innerHTML = `<p class="empty-state">Request not found.</p>`;
+    return;
   }
+  document.getElementById('modalTitle').textContent = request.requestId;
 
-  const pinIsBlank = user.pin === '' || user.pin === null || user.pin === undefined;
-  const enteredMatchesUserId = String(pin).trim().toLowerCase() === String(rssUserId).trim().toLowerCase();
+  const itemRows = items.map(item => {
+    const material = findMaterial(item.materialId);
+    const name = material ? material.materialName : item.materialId;
+    const canAct = canReviewRequests() && item.itemStatus === 'Pending' && request.currentStage === 'BTL Review';
+    return `
+      <tr data-item-id="${escapeHtml(item.itemId)}">
+        <td>${escapeHtml(name)}</td>
+        <td>${escapeHtml(item.qtyRequested)}</td>
+        <td>${item.qtyApproved !== '' && item.qtyApproved !== undefined ? escapeHtml(item.qtyApproved) : '—'}</td>
+        <td>${stampFor(item.itemStatus)}</td>
+        <td>${escapeHtml(item.btlRemarks || '—')}</td>
+        <td>
+          ${canAct ? `
+            <div class="action-btns">
+              <input type="number" class="item-qty-input" placeholder="Qty" value="${escapeHtml(item.qtyRequested)}" style="width:64px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elevated);color:var(--text-primary);">
+              <button class="btn btn-primary btn-sm item-approve-btn">Approve</button>
+              <button class="btn btn-danger btn-sm item-reject-btn">Reject</button>
+              <button class="btn btn-secondary btn-sm item-clarify-btn">Clarify</button>
+            </div>
+          ` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
 
-  if (pinIsBlank) {
-    // First-time login: PIN defaults to the User ID until they set a real one.
-    if (!enteredMatchesUserId) throw new Error('Incorrect PIN.');
-  } else if (String(user.pin).trim() !== String(pin).trim()) {
-    throw new Error('Incorrect PIN.');
-  }
+  const timelineHtml = timeline.slice().reverse().map(t => `
+    <div class="timeline-item">
+      <div class="timeline-dot"></div>
+      <div>
+        <div class="timeline-content"><strong>${escapeHtml(t.action)}</strong> — ${escapeHtml(t.remarks || '')}</div>
+        <div class="timeline-meta">${escapeHtml(t.actorUserId)} · ${escapeHtml(t.stage)} · ${formatDate(t.timestamp)}</div>
+      </div>
+    </div>
+  `).join('');
 
-  updateRecordFields_(sheet, user._row, { lastLogin: new Date() });
-  logActivity_(rssUserId, user.position, 'LOGIN', 'USER', rssUserId, '');
+  const allReviewed = items.every(i => i.itemStatus !== 'Pending');
+  const showFinalize = canReviewRequests() && request.currentStage === 'BTL Review' && allReviewed && items.length > 0;
+  const showRelease = canReleaseRequests() && request.overallStatus === 'Approved';
 
-  return {
-    userId: user.rssUserId,
-    fullName: user.fullName,
-    role: user.position,
-    region: user.region
-  };
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-grid">
+      <div class="field"><span class="field-label">Store</span><input disabled value="${escapeHtml(request.storeName)}"></div>
+      <div class="field"><span class="field-label">Region</span><input disabled value="${escapeHtml(request.region)}"></div>
+      <div class="field"><span class="field-label">Requested By</span><input disabled value="${escapeHtml(request.requestorUserId)}"></div>
+      <div class="field"><span class="field-label">Type</span><input disabled value="${escapeHtml(request.requestType)}"></div>
+      <div class="field span-2"><span class="field-label">Purpose</span><input disabled value="${escapeHtml(request.purpose)}"></div>
+      <div class="field span-2"><span class="field-label">Reason</span><input disabled value="${escapeHtml(request.reason)}"></div>
+      <div class="field"><span class="field-label">Status</span><div style="padding-top:6px;">${stampFor(request.overallStatus)}</div></div>
+      <div class="field"><span class="field-label">Stage</span><input disabled value="${escapeHtml(request.currentStage)}"></div>
+    </div>
+
+    <div class="section-title">Line Items</div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Material</th><th>Qty Req.</th><th>Qty Appr.</th><th>Status</th><th>Remarks</th><th></th></tr></thead>
+        <tbody>${itemRows || `<tr><td colspan="6" class="empty-state">No items.</td></tr>`}</tbody>
+      </table>
+    </div>
+
+    ${showFinalize ? `
+      <div class="section-title">Finalize Review</div>
+      <div class="field-row">
+        <div class="field">
+          <span class="field-label">Overall Decision</span>
+          <select id="finalizeStatus">
+            <option value="Approved">Approved</option>
+            <option value="Need Clarification">Need Clarification</option>
+            <option value="Rejected">Rejected</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="finalizeBtn">Finalize</button>
+      </div>
+    ` : ''}
+
+    ${showRelease ? `
+      <div class="section-title">Release to Requestor</div>
+      <div class="field-row">
+        <div class="field"><span class="field-label">Tracking Info (courier, plate no, etc.)</span><input id="trackingInfo" placeholder="Optional"></div>
+        <button class="btn btn-primary" id="releaseBtn">Mark Released</button>
+      </div>
+    ` : ''}
+
+    <div class="section-title">Timeline</div>
+    <div class="timeline">${timelineHtml || '<p class="empty-state">No activity yet.</p>'}</div>
+  `;
+
+  bindRequestDetailActions(request.requestId);
 }
 
-function handleResetPin(body) {
-  const { targetUserId, newPin, actorUserId } = body;
-  const sheet = getSheet_(SHEETS.PERSONEL_LIST);
-  const user = findRowById_(sheet, 'rssUserId', targetUserId);
-  if (!user) throw new Error('User not found.');
-
-  updateRecordFields_(sheet, user._row, {
-    pin: newPin,
-    pinStatus: 'Active',
-    resetRequest: 'No',
-    lastUpdated: new Date()
-  });
-  logActivity_(actorUserId, 'ADMIN', 'PIN_RESET', 'USER', targetUserId, '');
-  return { success: true };
-}
-
-// ===================================================================
-// BOOTSTRAP / READS
-// ===================================================================
-
-function handleGetLastUpdate() {
-  return { lastUpdate: getConfigValue_('LAST_DATA_UPDATE') };
-}
-
-/** One call to get everything a dashboard needs on first paint. */
-function handleGetBootstrap(params) {
-  const role = params.role;
-  const userId = params.userId;
-
-  return {
-    materials: sheetToObjects_(getSheet_(SHEETS.MATERIALS)),
-    requests: getRequestsForUser_(role, userId),
-    notifications: sheetToObjects_(getSheet_(SHEETS.NOTIFICATIONS)).filter(n => n.userId === userId),
-    approvalWindows: sheetToObjects_(getSheet_(SHEETS.APPROVAL_WINDOWS)),
-    lastUpdate: getConfigValue_('LAST_DATA_UPDATE')
-  };
-}
-
-function getRequestsForUser_(role, userId) {
-  const all = sheetToObjects_(getSheet_(SHEETS.REQUESTS));
-  if (role === ROLES.ADMIN || BTL_ROLES.indexOf(role) !== -1 || role === ROLES.WAREHOUSE) {
-    return all; // full visibility
-  }
-  return all.filter(r => r.requestorUserId === userId); // requestor sees only their own
-}
-
-function handleGetMaterials() {
-  return sheetToObjects_(getSheet_(SHEETS.MATERIALS));
-}
-
-function handleGetRequests(params) {
-  return getRequestsForUser_(params.role, params.userId);
-}
-
-function handleGetRequestDetail(params) {
-  const requestId = params.requestId;
-  const items = sheetToObjects_(getSheet_(SHEETS.REQUEST_ITEMS)).filter(i => i.requestId === requestId);
-  const timeline = sheetToObjects_(getSheet_(SHEETS.REQUEST_TIMELINE)).filter(t => t.requestId === requestId);
-  const request = findRowById_(getSheet_(SHEETS.REQUESTS), 'requestId', requestId);
-  return { request, items, timeline };
-}
-
-function handleGetNotifications(params) {
-  return sheetToObjects_(getSheet_(SHEETS.NOTIFICATIONS)).filter(n => n.userId === params.userId);
-}
-
-function handleGetActivityLog(params) {
-  const all = sheetToObjects_(getSheet_(SHEETS.ACTIVITY_LOG));
-  return params.limit ? all.slice(-Number(params.limit)) : all;
-}
-
-function handleLookupShop(params) {
-  const shopId = String(params.shopId || '').trim();
-  if (!shopId) throw new Error('Shop ID is required.');
-
-  const sheet = getSheet_(SHEETS.STORE_LIST);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) throw new Error('Shop ID not found.');
-
-  // Column order in STORE DETAILS: A Region, B City, C Responsible RSS,
-  // D RSS User ID, E Mall Name/Location, F Dealer Name, G DCR Name/Store Name,
-  // H Shop ID, I Store Type, J Status.
-  // Searching only the SHOP ID column (instead of reading/converting the whole
-  // sheet via sheetToObjects_) is what makes this fast.
-  const SHOP_ID_COL = 8;
-  const shopIdRange = sheet.getRange(2, SHOP_ID_COL, lastRow - 1, 1);
-  const finder = shopIdRange.createTextFinder(shopId).matchEntireCell(true).matchCase(false);
-  const cell = finder.findNext();
-  if (!cell) throw new Error('Shop ID not found.');
-
-  const rowValues = sheet.getRange(cell.getRow(), 1, 1, 8).getValues()[0];
-  return {
-    region: rowValues[0],
-    rssName: rowValues[2],
-    rssUserId: rowValues[3],
-    storeName: rowValues[6]
-  };
-}
-
-/** Personnel list for the Users admin screen. Never sends the pin field to the client. */
-function handleGetPersonnel() {
-  return sheetToObjects_(getSheet_(SHEETS.PERSONEL_LIST)).map(p => {
-    const { pin, ...safe } = p;
-    return safe;
-  });
-}
-
-// ===================================================================
-// REQUEST LIFECYCLE
-// ===================================================================
-
-/** Requestor submits a new request with N material line items. */
-function handleSubmitRequest(body) {
-  const { shopId, storeName, region, rssName, requestorUserId, contactNumber,
-    requestType, purpose, reason, photoLinks, items } = body;
-
-  if (!items || !items.length) throw new Error('At least one material item is required.');
-
-  const requestId = genId_('REQ');
-  const now = new Date();
-
-  appendRecord_(getSheet_(SHEETS.REQUESTS), {
-    requestId, timestamp: now, shopId, storeName, region, rssName,
-    requestorUserId, contactNumber, requestType, purpose, reason,
-    photoLinks: photoLinks || '',
-    overallStatus: 'Pending',
-    currentStage: 'BTL Review',
-    approvalWindowId: body.approvalWindowId || '',
-    createdAt: now, updatedAt: now
-  });
-
-  items.forEach(item => {
-    appendRecord_(getSheet_(SHEETS.REQUEST_ITEMS), {
-      itemId: genId_('ITM'),
-      requestId,
-      materialId: item.materialId,
-      qtyRequested: item.qty,
-      qtyApproved: '',
-      itemStatus: 'Pending',
-      btlRemarks: '',
-      warehouseRemarks: ''
+function bindRequestDetailActions(requestId) {
+  document.querySelectorAll('.item-approve-btn, .item-reject-btn, .item-clarify-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const row = e.target.closest('tr');
+      const itemId = row.dataset.itemId;
+      const qtyInput = row.querySelector('.item-qty-input');
+      const decision = btn.classList.contains('item-approve-btn') ? 'Approved'
+        : btn.classList.contains('item-reject-btn') ? 'Rejected' : 'Need Clarification';
+      const remarks = decision !== 'Approved' ? (prompt('Remarks (optional):') || '') : '';
+      btn.disabled = true;
+      try {
+        await Api.reviewRequestItem({
+          itemId, decision, qtyApproved: qtyInput ? qtyInput.value : '', remarks, actorUserId: SESSION.userId
+        });
+        toast('Item updated.', 'success');
+        openRequestDetail(requestId);
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.disabled = false;
+      }
     });
   });
 
-  addTimelineEntry_(requestId, 'Submitted', requestorUserId, 'SUBMITTED', 'Request submitted with ' + items.length + ' item(s).');
-  logActivity_(requestorUserId, ROLES.RSS, 'SUBMIT_REQUEST', 'REQUEST', requestId, '');
-
-  // Notify all BTL reviewers
-  const personnel = sheetToObjects_(getSheet_(SHEETS.PERSONEL_LIST));
-  personnel.filter(p => BTL_ROLES.indexOf(p.position) !== -1).forEach(btl => {
-    addNotification_(btl.rssUserId, 'NEW_REQUEST', `New request ${requestId} from ${storeName} needs review.`, requestId);
-  });
-
-  bumpLastUpdate_();
-  return { requestId };
-}
-
-/** BTL reviews a single line item: Approve / Reject / Need Clarification. Approving reserves stock. */
-function handleReviewRequestItem(body) {
-  const { itemId, decision, qtyApproved, remarks, actorUserId } = body;
-  const itemsSheet = getSheet_(SHEETS.REQUEST_ITEMS);
-  const item = findRowById_(itemsSheet, 'itemId', itemId);
-  if (!item) throw new Error('Request item not found.');
-
-  const fields = { itemStatus: decision, btlRemarks: remarks || '' };
-
-  if (decision === 'Approved') {
-    const qty = Number(qtyApproved || item.qtyRequested);
-    fields.qtyApproved = qty;
-    reserveStock_(item.materialId, qty);
-  }
-
-  updateRecordFields_(itemsSheet, item._row, fields);
-  addTimelineEntry_(item.requestId, 'BTL Review', actorUserId, decision.toUpperCase(), remarks || '');
-  logActivity_(actorUserId, 'BTL', 'REVIEW_ITEM', 'REQUEST_ITEM', itemId, decision);
-
-  bumpLastUpdate_();
-  return { success: true };
-}
-
-/** Reserves stock for an approved item: RESERVED STOCK += qty. */
-function reserveStock_(materialId, qty) {
-  const sheet = getSheet_(SHEETS.MATERIALS);
-  const material = findRowById_(sheet, 'materialId', materialId);
-  if (!material) throw new Error('Material not found: ' + materialId);
-  const newReserved = Number(material.reservedStock || 0) + Number(qty);
-  updateRecordFields_(sheet, material._row, { reservedStock: newReserved, lastUpdated: new Date() });
-}
-
-/** After all items on a request are reviewed, BTL finalizes overall request status. */
-function handleFinalizeRequestReview(body) {
-  const { requestId, overallStatus, remarks, actorUserId } = body;
-  const requestsSheet = getSheet_(SHEETS.REQUESTS);
-  const request = findRowById_(requestsSheet, 'requestId', requestId);
-  if (!request) throw new Error('Request not found.');
-
-  const nextStage = overallStatus === 'Approved' ? 'Warehouse Processing'
-    : overallStatus === 'Need Clarification' ? 'Awaiting Requestor'
-    : 'Closed';
-
-  updateRecordFields_(requestsSheet, request._row, {
-    overallStatus, currentStage: nextStage, updatedAt: new Date()
-  });
-
-  addTimelineEntry_(requestId, 'BTL Decision', actorUserId, overallStatus.toUpperCase(), remarks || '');
-  logActivity_(actorUserId, 'BTL', 'FINALIZE_REVIEW', 'REQUEST', requestId, overallStatus);
-
-  addNotification_(request.requestorUserId, 'STATUS_UPDATE',
-    `Your request ${requestId} was marked ${overallStatus}.`, requestId);
-
-  if (overallStatus === 'Approved') {
-    const personnel = sheetToObjects_(getSheet_(SHEETS.PERSONEL_LIST));
-    personnel.filter(p => p.position === ROLES.WAREHOUSE).forEach(w => {
-      addNotification_(w.rssUserId, 'READY_FOR_RELEASE', `Request ${requestId} is approved and ready for prep/release.`, requestId);
+  const finalizeBtn = document.getElementById('finalizeBtn');
+  if (finalizeBtn) {
+    finalizeBtn.addEventListener('click', async () => {
+      const overallStatus = document.getElementById('finalizeStatus').value;
+      finalizeBtn.disabled = true;
+      try {
+        await Api.finalizeRequestReview({ requestId, overallStatus, remarks: '', actorUserId: SESSION.userId });
+        toast('Request finalized.', 'success');
+        closeModal();
+        refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
+      } catch (err) {
+        toast(err.message, 'error');
+        finalizeBtn.disabled = false;
+      }
     });
   }
 
-  bumpLastUpdate_();
-  return { success: true };
+  const releaseBtn = document.getElementById('releaseBtn');
+  if (releaseBtn) {
+    releaseBtn.addEventListener('click', async () => {
+      const trackingInfo = document.getElementById('trackingInfo').value.trim();
+      releaseBtn.disabled = true;
+      try {
+        await Api.releaseRequest({ requestId, trackingInfo, actorUserId: SESSION.userId });
+        toast('Request released.', 'success');
+        closeModal();
+        refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
+      } catch (err) {
+        toast(err.message, 'error');
+        releaseBtn.disabled = false;
+      }
+    });
+  }
 }
 
-/** Warehouse releases a request: deducts approved qty from CURRENT STOCK and clears RESERVED STOCK for those items. */
-function handleReleaseRequest(body) {
-  const { requestId, actorUserId, trackingInfo } = body;
-  const itemsSheet = getSheet_(SHEETS.REQUEST_ITEMS);
-  const items = sheetToObjects_(itemsSheet).filter(i => i.requestId === requestId && i.itemStatus === 'Approved');
+// ===================================================================
+// NEW REQUEST FORM
+// ===================================================================
 
-  items.forEach(item => {
-    deductStock_(item.materialId, Number(item.qtyApproved));
-    updateRecordFields_(itemsSheet, item._row, { itemStatus: 'Released' });
-  });
+function viewNewRequestForm() {
+  const openWindows = (STATE.approvalWindows || []).filter(w => w.status === 'Open');
+  return `
+    <div class="page-header"><h1 class="page-title">New Request</h1></div>
+    <div class="card">
+      <div class="section-title">Shop Details</div>
+      <div class="form-grid">
+        <div class="field">
+          <span class="field-label">Shop ID</span>
+          <input id="nrShopId" placeholder="e.g. PH003980" autocomplete="off">
+          <span class="field-hint" id="nrShopIdStatus"></span>
+        </div>
+        <div class="field"><span class="field-label">Store Name</span><input id="nrStoreName" disabled></div>
+        <div class="field"><span class="field-label">Region</span><input id="nrRegion" disabled></div>
+        <div class="field"><span class="field-label">Responsible RSS</span><input id="nrRssName" disabled></div>
+        <div class="field"><span class="field-label">Contact Number</span><input id="nrContact" placeholder="09xxxxxxxxx"></div>
+        <div class="field">
+          <span class="field-label">Request Type</span>
+          <select id="nrType">${REQUEST_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        ${openWindows.length ? `
+        <div class="field">
+          <span class="field-label">Approval Window (optional)</span>
+          <select id="nrWindow">
+            <option value="">— None —</option>
+            ${openWindows.map(w => `<option value="${escapeHtml(w.windowId)}">${escapeHtml(w.windowName)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        <div class="field span-2"><span class="field-label">Purpose</span><textarea id="nrPurpose" placeholder="What is this request for?"></textarea></div>
+        <div class="field span-2"><span class="field-label">Reason</span><textarea id="nrReason" placeholder="Why is it needed?"></textarea></div>
+        <div class="field span-2"><span class="field-label">Photo Links (optional, comma-separated URLs)</span><input id="nrPhotoLinks" placeholder="https://..."></div>
+      </div>
 
-  const requestsSheet = getSheet_(SHEETS.REQUESTS);
-  const request = findRowById_(requestsSheet, 'requestId', requestId);
-  updateRecordFields_(requestsSheet, request._row, {
-    overallStatus: 'Completed', currentStage: 'Completed', updatedAt: new Date()
-  });
+      <div class="section-title">Materials Requested</div>
+      <div id="nrItemsContainer"></div>
+      <button type="button" class="btn btn-secondary btn-sm" id="nrAddItemBtn">+ Add material</button>
 
-  addTimelineEntry_(requestId, 'Warehouse Release', actorUserId, 'RELEASED', trackingInfo || '');
-  logActivity_(actorUserId, ROLES.WAREHOUSE, 'RELEASE_REQUEST', 'REQUEST', requestId, trackingInfo || '');
-  addNotification_(request.requestorUserId, 'RELEASED', `Request ${requestId} has been released.`, requestId);
-
-  bumpLastUpdate_();
-  return { success: true };
+      <p class="login-error" id="nrError"></p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="nrSubmitBtn">Submit Request</button>
+      </div>
+    </div>
+  `;
 }
 
-/** Deducts from CURRENT STOCK and removes the matching amount from RESERVED STOCK. */
-function deductStock_(materialId, qty) {
-  const sheet = getSheet_(SHEETS.MATERIALS);
-  const material = findRowById_(sheet, 'materialId', materialId);
-  if (!material) throw new Error('Material not found: ' + materialId);
-  const newCurrent = Number(material.currentStock || 0) - Number(qty);
-  const newReserved = Math.max(0, Number(material.reservedStock || 0) - Number(qty));
-  updateRecordFields_(sheet, material._row, {
-    currentStock: newCurrent, reservedStock: newReserved, lastUpdated: new Date()
+function bindNewRequestForm() {
+  itemRowSeq = 0;
+  const container = document.getElementById('nrItemsContainer');
+  addNewRequestItemRow(container);
+
+  document.getElementById('nrAddItemBtn').addEventListener('click', () => addNewRequestItemRow(container));
+
+  const shopIdInput = document.getElementById('nrShopId');
+  const statusEl = document.getElementById('nrShopIdStatus');
+
+  async function runShopLookup() {
+    const shopId = shopIdInput.value.trim();
+    const errorEl = document.getElementById('nrError');
+    errorEl.textContent = '';
+    if (!shopId) { statusEl.textContent = ''; return; }
+    statusEl.textContent = 'Looking up…';
+    statusEl.className = 'field-hint';
+    try {
+      const shop = await Api.lookupShop(shopId);
+      document.getElementById('nrStoreName').value = shop.storeName || '';
+      document.getElementById('nrRegion').value = shop.region || '';
+      document.getElementById('nrRssName').value = shop.rssName || '';
+      statusEl.textContent = 'Shop found ✓';
+      statusEl.className = 'field-hint field-hint-success';
+    } catch (err) {
+      document.getElementById('nrStoreName').value = '';
+      document.getElementById('nrRegion').value = '';
+      document.getElementById('nrRssName').value = '';
+      statusEl.textContent = err.message;
+      statusEl.className = 'field-hint field-hint-error';
+    }
+  }
+
+  shopIdInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runShopLookup();
+    }
+  });
+  shopIdInput.addEventListener('blur', runShopLookup);
+
+  document.getElementById('nrSubmitBtn').addEventListener('click', submitNewRequest);
+}
+
+function addNewRequestItemRow(container) {
+  const rowId = `nrItem${itemRowSeq++}`;
+  const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  row.id = rowId;
+  row.innerHTML = `
+    <select class="nr-item-material">
+      <option value="">— Select material —</option>
+      ${activeMaterials.map(m => `<option value="${escapeHtml(m.materialId)}">${escapeHtml(m.materialName)} (${escapeHtml(m.unit)})</option>`).join('')}
+    </select>
+    <input type="number" class="nr-item-qty" placeholder="Qty" min="1">
+    <button type="button" class="item-row-remove" aria-label="Remove"><svg viewBox="0 0 24 24">TRASHICON</svg></button>
+  `.replace('TRASHICON', ICONS.trash);
+  row.querySelector('.item-row-remove').addEventListener('click', () => row.remove());
+  container.appendChild(row);
+}
+
+async function submitNewRequest() {
+  const errorEl = document.getElementById('nrError');
+  errorEl.textContent = '';
+
+  const shopId = document.getElementById('nrShopId').value.trim();
+  const storeName = document.getElementById('nrStoreName').value.trim();
+  const region = document.getElementById('nrRegion').value.trim();
+  const rssName = document.getElementById('nrRssName').value.trim();
+  const contactNumber = document.getElementById('nrContact').value.trim();
+  const requestType = document.getElementById('nrType').value;
+  const purpose = document.getElementById('nrPurpose').value.trim();
+  const reason = document.getElementById('nrReason').value.trim();
+  const photoLinks = document.getElementById('nrPhotoLinks').value.trim();
+  const windowEl = document.getElementById('nrWindow');
+  const approvalWindowId = windowEl ? windowEl.value : '';
+
+  if (!shopId || !storeName) { errorEl.textContent = 'Look up a valid Shop ID first.'; return; }
+  if (!purpose || !reason) { errorEl.textContent = 'Purpose and reason are required.'; return; }
+
+  const items = [];
+  document.querySelectorAll('#nrItemsContainer .item-row').forEach(row => {
+    const materialId = row.querySelector('.nr-item-material').value;
+    const qty = Number(row.querySelector('.nr-item-qty').value || 0);
+    if (materialId && qty > 0) items.push({ materialId, qty });
+  });
+  if (!items.length) { errorEl.textContent = 'Add at least one material with a valid quantity.'; return; }
+
+  const btn = document.getElementById('nrSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  try {
+    const result = await Api.submitRequest({
+      shopId, storeName, region, rssName, requestorUserId: SESSION.userId, contactNumber,
+      requestType, purpose, reason, photoLinks, approvalWindowId, items
+    });
+    toast(`Request ${result.requestId} submitted.`, 'success');
+    currentView = 'dashboard';
+    renderSidebarNav();
+    await refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
+  } catch (err) {
+    errorEl.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Submit Request';
+  }
+}
+
+// ===================================================================
+// APPROVAL WINDOWS
+// ===================================================================
+
+function viewApprovalWindows() {
+  const rows = (STATE.approvalWindows || []).slice().reverse().map(w => `
+    <tr>
+      <td class="mono">${escapeHtml(w.windowId)}</td>
+      <td>${escapeHtml(w.windowName)}</td>
+      <td>${formatDate(w.startDate)}</td>
+      <td>${formatDate(w.endDate)}</td>
+      <td>${escapeHtml(w.status)}</td>
+      <td>${escapeHtml(w.createdBy)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="page-header"><h1 class="page-title">Approval Windows</h1></div>
+    ${isAdmin() ? `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="section-title">Create New Window</div>
+      <div class="form-grid">
+        <div class="field"><span class="field-label">Window Name</span><input id="awName" placeholder="e.g. Q3 2026 Store Refresh"></div>
+        <div class="field"><span class="field-label">Start Date</span><input id="awStart" type="date"></div>
+        <div class="field"><span class="field-label">End Date</span><input id="awEnd" type="date"></div>
+      </div>
+      <p class="login-error" id="awError"></p>
+      <div class="form-actions"><button class="btn btn-primary" id="awCreateBtn">Create Window</button></div>
+    </div>` : ''}
+    <div class="card table-wrap">
+      <table class="data-table">
+        <thead><tr><th>ID</th><th>Name</th><th>Start</th><th>End</th><th>Status</th><th>Created By</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No approval windows yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function bindApprovalWindows() {
+  const btn = document.getElementById('awCreateBtn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const errorEl = document.getElementById('awError');
+    const windowName = document.getElementById('awName').value.trim();
+    const startDate = document.getElementById('awStart').value;
+    const endDate = document.getElementById('awEnd').value;
+    if (!windowName || !startDate || !endDate) {
+      errorEl.textContent = 'All fields are required.';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await Api.createApprovalWindow({ windowName, startDate, endDate, actorUserId: SESSION.userId });
+      toast('Approval window created.', 'success');
+      await refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
+    } catch (err) {
+      errorEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 
 // ===================================================================
-// MISC WRITES
+// ACTIVITY LOG
 // ===================================================================
 
-function handleMarkNotificationRead(body) {
-  const sheet = getSheet_(SHEETS.NOTIFICATIONS);
-  const notif = findRowById_(sheet, 'notificationId', body.notificationId);
-  if (!notif) throw new Error('Notification not found.');
-  updateRecordFields_(sheet, notif._row, { readStatus: 'Read' });
-  return { success: true };
+function viewActivityLogShell() {
+  return `
+    <div class="page-header"><h1 class="page-title">Activity Logs</h1></div>
+    <div class="toolbar">
+      <div class="toolbar-search">
+        <input id="logSearch" placeholder="Filter by user, action, or target...">
+      </div>
+    </div>
+    <div class="card table-wrap" id="logTableWrap"><p class="empty-state">Loading...</p></div>
+  `;
 }
 
-function handleCreateApprovalWindow(body) {
-  const { windowName, startDate, endDate, actorUserId } = body;
-  const windowId = genId_('WIN');
-  appendRecord_(getSheet_(SHEETS.APPROVAL_WINDOWS), {
-    windowId, windowName, startDate, endDate, status: 'Open',
-    createdBy: actorUserId, createdAt: new Date()
-  });
-  logActivity_(actorUserId, ROLES.ADMIN, 'CREATE_APPROVAL_WINDOW', 'APPROVAL_WINDOW', windowId, windowName);
-  bumpLastUpdate_();
-  return { windowId };
-}
-
-function handleUpsertMaterial(body) {
-  const sheet = getSheet_(SHEETS.MATERIALS);
-  const existing = body.materialId ? findRowById_(sheet, 'materialId', body.materialId) : null;
-
-  if (existing) {
-    updateRecordFields_(sheet, existing._row, {
-      category: body.category, materialName: body.materialName, unit: body.unit,
-      currentStock: body.currentStock, reorderLevel: body.reorderLevel,
-      status: body.status, lastUpdated: new Date()
-    });
-    logActivity_(body.actorUserId, ROLES.ADMIN, 'UPDATE_MATERIAL', 'MATERIAL', body.materialId, '');
-    bumpLastUpdate_();
-    return { materialId: body.materialId };
+async function loadActivityLog() {
+  const wrap = document.getElementById('logTableWrap');
+  try {
+    const logs = await Api.getActivityLog(300);
+    renderActivityLogTable(logs.slice().reverse());
+    const search = document.getElementById('logSearch');
+    if (search) {
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        const filtered = logs.slice().reverse().filter(l =>
+          [l.userId, l.role, l.action, l.targetType, l.targetId, l.details].join(' ').toLowerCase().includes(q)
+        );
+        renderActivityLogTable(filtered);
+      });
+    }
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
-
-  const materialId = genId_('MAT');
-  appendRecord_(sheet, {
-    materialId, category: body.category, materialName: body.materialName, unit: body.unit,
-    currentStock: body.currentStock || 0, reservedStock: 0, reorderLevel: body.reorderLevel || 0,
-    status: 'Active', lastUpdated: new Date()
-  });
-  logActivity_(body.actorUserId, ROLES.ADMIN, 'CREATE_MATERIAL', 'MATERIAL', materialId, '');
-  bumpLastUpdate_();
-  return { materialId };
 }
 
-/** Creates or updates a PERSONEL LIST row. Never touches pin/pinStatus here — use resetPin for that. */
-function handleUpsertPersonnel(body) {
-  const sheet = getSheet_(SHEETS.PERSONEL_LIST);
-  const existing = body.rssUserId ? findRowById_(sheet, 'rssUserId', body.rssUserId) : null;
+function renderActivityLogTable(logs) {
+  const wrap = document.getElementById('logTableWrap');
+  if (!wrap) return;
+  const rows = logs.map(l => `
+    <tr>
+      <td>${formatDate(l.timestamp)}</td>
+      <td class="mono">${escapeHtml(l.userId)}</td>
+      <td>${escapeHtml(l.role)}</td>
+      <td>${escapeHtml(l.action)}</td>
+      <td>${escapeHtml(l.targetType)}</td>
+      <td class="mono">${escapeHtml(l.targetId)}</td>
+      <td>${escapeHtml(l.details)}</td>
+    </tr>
+  `).join('');
+  wrap.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Target Type</th><th>Target ID</th><th>Details</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No activity found.</td></tr>`}</tbody>
+    </table>
+  `;
+}
 
-  if (existing) {
-    updateRecordFields_(sheet, existing._row, {
-      fullName: body.fullName, position: body.position, region: body.region,
-      contactNumber: body.contactNumber || '', lastUpdated: new Date()
-    });
-    logActivity_(body.actorUserId, ROLES.ADMIN, 'UPDATE_USER', 'USER', body.rssUserId, '');
-    bumpLastUpdate_();
-    return { rssUserId: body.rssUserId };
+// ===================================================================
+// USERS (Admin)
+// ===================================================================
+
+let USERS_CACHE = [];
+
+function viewUsersShell() {
+  return `
+    <div class="page-header">
+      <h1 class="page-title">User Management</h1>
+      <button class="btn btn-primary btn-sm" id="userAddBtn">+ Add User</button>
+    </div>
+    <div class="card table-wrap" id="usersTableWrap"><p class="empty-state">Loading...</p></div>
+  `;
+}
+
+async function loadUsers() {
+  const wrap = document.getElementById('usersTableWrap');
+  document.getElementById('userAddBtn').addEventListener('click', () => openUserModal(null));
+  try {
+    USERS_CACHE = await Api.getPersonnel();
+    renderUsersTable();
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
+}
 
-  if (!body.rssUserId) throw new Error('User ID is required.');
-  appendRecord_(sheet, {
-    rssUserId: body.rssUserId, fullName: body.fullName, position: body.position, region: body.region,
-    contactNumber: body.contactNumber || '', pin: '', pinStatus: 'Active', resetRequest: 'No',
-    lastLogin: '', lastUpdated: new Date()
+function renderUsersTable() {
+  const wrap = document.getElementById('usersTableWrap');
+  const rows = USERS_CACHE.map(u => `
+    <tr>
+      <td class="mono">${escapeHtml(u.rssUserId)}</td>
+      <td>${escapeHtml(u.fullName)}</td>
+      <td>${escapeHtml(u.position)}</td>
+      <td>${escapeHtml(u.region)}</td>
+      <td>${escapeHtml(u.pinStatus || 'Active')}</td>
+      <td>${formatDate(u.lastLogin)}</td>
+      <td>
+        <div class="action-btns">
+          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}">Edit</button>
+          <button class="btn btn-secondary btn-sm user-reset-btn" data-id="${escapeHtml(u.rssUserId)}">Reset PIN</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  wrap.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>Region</th><th>PIN Status</th><th>Last Login</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No users found.</td></tr>`}</tbody>
+    </table>
+  `;
+  document.querySelectorAll('.user-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => openUserModal(USERS_CACHE.find(u => u.rssUserId === btn.dataset.id)));
   });
-  logActivity_(body.actorUserId, ROLES.ADMIN, 'CREATE_USER', 'USER', body.rssUserId, '');
-  bumpLastUpdate_();
-  return { rssUserId: body.rssUserId };
+  document.querySelectorAll('.user-reset-btn').forEach(btn => {
+    btn.addEventListener('click', () => openResetPinModal(btn.dataset.id));
+  });
+}
+
+function openUserModal(user) {
+  const isEdit = !!user;
+  const roleOptions = Object.values(ROLES);
+  openModal(isEdit ? 'Edit User' : 'Add User', `
+    <div class="form-grid">
+      <div class="field"><span class="field-label">User ID</span><input id="uUserId" value="${escapeHtml(user ? user.rssUserId : '')}" ${isEdit ? 'disabled' : ''}></div>
+      <div class="field"><span class="field-label">Full Name</span><input id="uFullName" value="${escapeHtml(user ? user.fullName : '')}"></div>
+      <div class="field">
+        <span class="field-label">Role</span>
+        <select id="uRole">${roleOptions.map(r => `<option value="${r}" ${user && user.position === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
+      </div>
+      <div class="field"><span class="field-label">Region</span><input id="uRegion" value="${escapeHtml(user ? user.region : '')}"></div>
+      <div class="field span-2"><span class="field-label">Contact Number</span><input id="uContact" value="${escapeHtml(user ? user.contactNumber : '')}"></div>
+    </div>
+    ${!isEdit ? `<p class="form-note">New users log in for the first time using their User ID as the PIN.</p>` : ''}
+    <p class="login-error" id="uModalError"></p>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="uSaveBtn">${isEdit ? 'Save Changes' : 'Add User'}</button>
+      <button class="btn btn-ghost" id="uCancelBtn">Cancel</button>
+    </div>
+  `);
+
+  document.getElementById('uCancelBtn').addEventListener('click', closeModal);
+  document.getElementById('uSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('uModalError');
+    const payload = {
+      rssUserId: document.getElementById('uUserId').value.trim(),
+      fullName: document.getElementById('uFullName').value.trim(),
+      position: document.getElementById('uRole').value,
+      region: document.getElementById('uRegion').value.trim(),
+      contactNumber: document.getElementById('uContact').value.trim(),
+      actorUserId: SESSION.userId
+    };
+    if (!payload.rssUserId || !payload.fullName) {
+      errorEl.textContent = 'User ID and full name are required.';
+      return;
+    }
+    try {
+      await Api.upsertPersonnel(payload);
+      closeModal();
+      toast('User saved.', 'success');
+      loadUsers();
+    } catch (err) {
+      errorEl.textContent = err.message;
+    }
+  });
+}
+
+function openResetPinModal(targetUserId) {
+  openModal('Reset PIN', `
+    <p class="form-note">This resets ${escapeHtml(targetUserId)}'s PIN. They'll use the new PIN on their next login.</p>
+    <div class="field"><span class="field-label">New PIN</span><input id="rpNewPin" type="text" placeholder="Leave blank to reset to User ID"></div>
+    <p class="login-error" id="rpError"></p>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="rpSaveBtn">Reset PIN</button>
+      <button class="btn btn-ghost" id="rpCancelBtn">Cancel</button>
+    </div>
+  `);
+  document.getElementById('rpCancelBtn').addEventListener('click', closeModal);
+  document.getElementById('rpSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('rpError');
+    const newPin = document.getElementById('rpNewPin').value.trim() || targetUserId;
+    try {
+      await Api.resetPin(targetUserId, newPin, SESSION.userId);
+      closeModal();
+      toast('PIN reset.', 'success');
+      loadUsers();
+    } catch (err) {
+      errorEl.textContent = err.message;
+    }
+  });
+}
+
+// ===================================================================
+// SETTINGS
+// ===================================================================
+
+function viewSettings() {
+  return `
+    <div class="page-header"><h1 class="page-title">Settings</h1></div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="section-title">Profile</div>
+      <div class="form-grid">
+        <div class="field"><span class="field-label">User ID</span><input disabled value="${escapeHtml(SESSION.userId)}"></div>
+        <div class="field"><span class="field-label">Full Name</span><input disabled value="${escapeHtml(SESSION.fullName || '—')}"></div>
+        <div class="field"><span class="field-label">Role</span><input disabled value="${escapeHtml(SESSION.role)}"></div>
+        <div class="field"><span class="field-label">Region</span><input disabled value="${escapeHtml(SESSION.region || '—')}"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">Change PIN</div>
+      <div class="form-grid">
+        <div class="field"><span class="field-label">Current PIN</span><input id="stCurrentPin" type="password"></div>
+        <div class="field"><span class="field-label">New PIN</span><input id="stNewPin" type="password"></div>
+        <div class="field"><span class="field-label">Confirm New PIN</span><input id="stConfirmPin" type="password"></div>
+      </div>
+      <p class="login-error" id="stError"></p>
+      <div class="form-actions"><button class="btn btn-primary" id="stSaveBtn">Update PIN</button></div>
+    </div>
+  `;
+}
+
+function bindSettings() {
+  document.getElementById('stSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('stError');
+    errorEl.textContent = '';
+    const currentPin = document.getElementById('stCurrentPin').value.trim();
+    const newPin = document.getElementById('stNewPin').value.trim();
+    const confirmPin = document.getElementById('stConfirmPin').value.trim();
+
+    if (!currentPin || !newPin) { errorEl.textContent = 'Fill in all fields.'; return; }
+    if (newPin !== confirmPin) { errorEl.textContent = 'New PIN and confirmation do not match.'; return; }
+
+    const btn = document.getElementById('stSaveBtn');
+    btn.disabled = true;
+    try {
+      await Api.login(SESSION.userId, currentPin);
+      await Api.resetPin(SESSION.userId, newPin, SESSION.userId);
+      toast('PIN updated.', 'success');
+      document.getElementById('stCurrentPin').value = '';
+      document.getElementById('stNewPin').value = '';
+      document.getElementById('stConfirmPin').value = '';
+    } catch (err) {
+      errorEl.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
