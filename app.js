@@ -1,1173 +1,554 @@
-/**
- * BTL x MRMS — APP
- * Handles: login/session, instant load from cache + background refresh,
- * polling-based sync, theme toggle, sidebar nav, notification panel,
- * view routing, and every page (dashboard, materials, requests + detail,
- * new request form, approval windows, activity log, users, settings).
- */
+/* ===================================================================
+   BTL x MRMS — DESIGN TOKENS
+   Palette: industrial teal, built for a requisition/warehouse system.
+   Dark is default (matches prior Infinix preference for softened teal
+   over neon). Light mode included as a full parallel system.
+=================================================================== */
 
-let SESSION = null;       // { userId, fullName, role, region }
-let STATE = {              // in-memory app data, hydrated from cache then network
-  materials: [],
-  requests: [],
-  notifications: [],
-  approvalWindows: [],
-  lastUpdate: null
-};
-let currentView = 'dashboard';
-let pollTimer = null;
-let itemRowSeq = 0;
+:root {
+  /* Dark (default) */
+  --bg: #12181A;
+  --bg-elevated: #171F22;
+  --surface: #1C2528;
+  --surface-hover: #222D30;
+  --border: #2A3538;
+  --border-strong: #3A484C;
 
-const REQUEST_TYPES = ['Regular Replenishment', 'New Store Setup', 'Damage Replacement', 'Special Request'];
+  --text-primary: #E8EDEC;
+  --text-secondary: #9DACAD;
+  --text-muted: #6B7A7C;
 
-// ===================================================================
-// ICONS (inline, keeps this dependency-free)
-// ===================================================================
-const ICONS = {
-  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
-  box: '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
-  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
-  users: '<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.33 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.33 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.33-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  trash: '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z"/>',
-  edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>'
-};
+  --accent: #3FB6AB;
+  --accent-strong: #59D6C9;
+  --accent-dim: #24413E;
 
-// ===================================================================
-// INIT
-// ===================================================================
+  --amber: #E8A33D;
+  --amber-dim: #40331C;
+  --green: #4CAF7D;
+  --green-dim: #1E3A2C;
+  --red: #E5484D;
+  --red-dim: #402024;
+  --blue: #4C9AE8;
+  --blue-dim: #1E2F40;
 
-document.addEventListener('DOMContentLoaded', () => {
-  applyStoredTheme();
-  bindThemeToggles();
-  bindLoginForm();
-  bindSidebarToggle();
-  bindNotifPanel();
-  bindModal();
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
 
-  const stored = localStorage.getItem(CONFIG.STORAGE_KEYS.SESSION);
-  if (stored) {
-    SESSION = JSON.parse(stored);
-    enterApp();
-  }
-});
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
 
-// ===================================================================
-// THEME
-// ===================================================================
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 68px;
 
-function applyStoredTheme() {
-  const saved = localStorage.getItem(CONFIG.STORAGE_KEYS.THEME) || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.24);
+  --shadow-pop: 0 8px 24px rgba(0,0,0,0.4);
 }
 
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme') || 'dark';
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem(CONFIG.STORAGE_KEYS.THEME, next);
+[data-theme="light"] {
+  --bg: #F4F6F5;
+  --bg-elevated: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-hover: #EEF2F1;
+  --border: #DCE3E1;
+  --border-strong: #C3CDCA;
+
+  --text-primary: #131A1B;
+  --text-secondary: #556063;
+  --text-muted: #8B9695;
+
+  --accent: #17847A;
+  --accent-strong: #106B62;
+  --accent-dim: #DDF0EE;
+
+  --amber-dim: #FCEFD8;
+  --green-dim: #DFF3E7;
+  --red-dim: #FBE2E3;
+  --blue-dim: #E1EDFB;
+
+  --shadow-card: 0 1px 3px rgba(20,30,30,0.08);
+  --shadow-pop: 0 12px 28px rgba(20,30,30,0.14);
 }
 
-function bindThemeToggles() {
-  document.getElementById('themeToggleLogin').addEventListener('click', toggleTheme);
-  document.getElementById('themeToggleApp').addEventListener('click', toggleTheme);
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-// ===================================================================
-// LOGIN / SESSION
-// ===================================================================
+.hidden { display: none !important; }
 
-function bindLoginForm() {
-  const form = document.getElementById('loginForm');
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input { font-family: inherit; }
+svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
-  document.getElementById('forgotPinBtn').addEventListener('click', () => {
-    document.getElementById('loginError').textContent = 'Contact your Admin to reset your PIN.';
-  });
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const userId = document.getElementById('loginUserId').value.trim();
-    const pin = document.getElementById('loginPin').value.trim();
-    const errorEl = document.getElementById('loginError');
-    const btn = document.getElementById('loginBtn');
+/* ===================================================================
+   LOGIN
+=================================================================== */
 
-    errorEl.textContent = '';
-    btn.textContent = 'Logging in...';
-    btn.disabled = true;
-
-    try {
-      const user = await Api.login(userId, pin);
-      SESSION = user;
-      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION, JSON.stringify(user));
-      enterApp();
-    } catch (err) {
-      errorEl.textContent = err.message;
-    } finally {
-      btn.textContent = 'Log In';
-      btn.disabled = false;
-    }
-  });
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 20% 20%, var(--accent-dim) 0%, transparent 45%),
+    var(--bg);
+  position: relative;
 }
 
-function logout() {
-  clearInterval(pollTimer);
-  localStorage.removeItem(CONFIG.STORAGE_KEYS.SESSION);
-  SESSION = null;
-  document.getElementById('appShell').classList.add('hidden');
-  document.getElementById('loginScreen').classList.remove('hidden');
-  document.getElementById('loginForm').reset();
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 40px 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
 }
 
-// ===================================================================
-// APP ENTRY — instant load from cache, then background refresh + polling
-// ===================================================================
+.login-mark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+}
+.login-mark-bracket { color: var(--accent); }
 
-function enterApp() {
-  document.getElementById('loginScreen').classList.add('hidden');
-  document.getElementById('appShell').classList.remove('hidden');
-
-  try {
-    renderUserBadge();
-    renderSidebarNav();
-
-    const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      STATE = JSON.parse(cached);
-    }
-    renderView(currentView);
-
-    refreshBootstrap(cacheKey);
-
-    clearInterval(pollTimer);
-    pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
-  } catch (err) {
-    console.error('enterApp failed:', err);
-    document.getElementById('content').innerHTML =
-      `<div class="page-header"><h1 class="page-title">Something went wrong</h1></div><p class="empty-state">${escapeHtml(err.message)}</p>`;
-  }
+.login-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 28px;
 }
 
-async function refreshBootstrap(cacheKey) {
-  setSyncStatus('syncing');
-  try {
-    const data = await Api.getBootstrap(SESSION.role, SESSION.userId);
-    STATE = data;
-    localStorage.setItem(cacheKey, JSON.stringify(data));
-    renderView(currentView);
-    renderNotifications();
-    setSyncStatus('synced');
-  } catch (err) {
-    console.error('Bootstrap refresh failed:', err);
-    setSyncStatus('offline');
-  }
+.login-form { display: flex; flex-direction: column; gap: 16px; }
+
+.field { display: flex; flex-direction: column; gap: 7px; }
+.field-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.field input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.field input::placeholder { color: var(--text-muted); }
+.field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+
+.btn {
+  border-radius: 10px;
+  padding: 13px 18px;
+  font-size: 14.5px;
+  font-weight: 600;
+  transition: filter 0.12s ease, transform 0.05s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: linear-gradient(90deg, #4F46E5 0%, #7C6CF0 100%);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(79,70,229,0.3);
+}
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-block { width: 100%; margin-top: 8px; }
+
+.login-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+.link-btn { color: #6D5DF0; font-weight: 600; }
+.link-btn:hover { text-decoration: underline; }
+.login-hint { color: var(--text-muted); }
+.btn-secondary { background: var(--surface-hover); color: var(--text-primary); border: 1px solid var(--border); }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover { color: var(--text-primary); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+.login-error {
+  min-height: 16px;
+  font-size: 12.5px;
+  color: var(--red);
+  text-align: center;
 }
 
-async function checkForUpdates(cacheKey) {
-  try {
-    const { lastUpdate } = await Api.getLastUpdate();
-    if (lastUpdate && lastUpdate !== STATE.lastUpdate) {
-      await refreshBootstrap(cacheKey);
-    } else {
-      setSyncStatus('synced');
-    }
-  } catch (err) {
-    setSyncStatus('offline');
-  }
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+}
+.theme-toggle:hover { background: var(--surface-hover); color: var(--text-primary); }
+.theme-toggle-login { position: absolute; top: 28px; right: 28px; }
+.icon-moon { display: none; }
+[data-theme="light"] .icon-sun { display: none; }
+[data-theme="light"] .icon-moon { display: block; }
+
+/* ===================================================================
+   APP SHELL
+=================================================================== */
+
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  transition: width 0.18s ease;
+}
+.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
+
+.sidebar-top { display: flex; align-items: center; gap: 10px; padding: 6px 6px 20px; }
+.sidebar-toggle { padding: 6px; border-radius: var(--radius-sm); color: var(--text-secondary); flex-shrink: 0; }
+.sidebar-toggle:hover { background: var(--surface-hover); color: var(--text-primary); }
+.sidebar-mark { font-family: var(--font-display); font-weight: 700; font-size: 17px; white-space: nowrap; overflow: hidden; }
+.sidebar.collapsed .sidebar-mark { opacity: 0; width: 0; }
+
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  position: relative;
+}
+.nav-item svg { flex-shrink: 0; }
+.nav-item:hover { background: var(--surface-hover); color: var(--text-primary); }
+.nav-item.active { background: var(--accent-dim); color: var(--accent-strong); }
+.sidebar.collapsed .nav-label { display: none; }
+
+.sidebar-bottom { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
+.sidebar.collapsed .theme-toggle .nav-label { display: none; }
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.sidebar-user:hover { background: var(--surface-hover); }
+.user-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent-dim); color: var(--accent-strong);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  flex-shrink: 0;
+}
+.user-meta { display: flex; flex-direction: column; overflow: hidden; flex: 1; }
+.user-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-role { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.logout-icon { width: 16px; height: 16px; color: var(--text-muted); flex-shrink: 0; }
+.sidebar.collapsed .user-meta, .sidebar.collapsed .logout-icon { display: none; }
+
+/* ===================================================================
+   TOPBAR
+=================================================================== */
+
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.topbar {
+  height: 60px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  gap: 20px;
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
-function setSyncStatus(status) {
-  const dot = document.querySelector('.sync-dot');
-  const text = document.getElementById('syncText');
-  dot.classList.remove('syncing', 'offline');
-  if (status === 'syncing') { dot.classList.add('syncing'); text.textContent = 'Syncing...'; }
-  else if (status === 'offline') { dot.classList.add('offline'); text.textContent = 'Offline'; }
-  else { text.textContent = 'Synced'; }
+.topbar-search {
+  flex: 1;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-muted);
+}
+.topbar-search svg { width: 16px; height: 16px; flex-shrink: 0; }
+.topbar-search input {
+  border: none; outline: none; background: transparent;
+  color: var(--text-primary); font-size: 13.5px; width: 100%;
 }
 
-// ===================================================================
-// ROLE HELPERS
-// ===================================================================
+.topbar-actions { display: flex; align-items: center; gap: 14px; }
 
-function isAdmin() { return SESSION.role === ROLES.ADMIN; }
-function isBTL() { return BTL_ROLES.indexOf(SESSION.role) !== -1; }
-function isWarehouse() { return SESSION.role === ROLES.WAREHOUSE; }
-function canReviewRequests() { return isAdmin() || isBTL(); }
-function canReleaseRequests() { return isAdmin() || isWarehouse(); }
+.sync-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.sync-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-dim); }
+.sync-dot.syncing { background: var(--amber); box-shadow: 0 0 0 3px var(--amber-dim); animation: pulse 1s infinite; }
+.sync-dot.offline { background: var(--red); box-shadow: 0 0 0 3px var(--red-dim); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-// ===================================================================
-// SIDEBAR
-// ===================================================================
-
-function renderUserBadge() {
-  document.getElementById('userAvatar').textContent = initials(SESSION.fullName || SESSION.userId);
-  document.getElementById('userName').textContent = SESSION.fullName || SESSION.userId;
-  document.getElementById('userRole').textContent = SESSION.role;
+.icon-btn {
+  position: relative;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+.icon-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
+.notif-badge {
+  position: absolute; top: 2px; right: 2px;
+  background: var(--red); color: #fff;
+  font-size: 9.5px; font-weight: 700;
+  min-width: 15px; height: 15px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px;
 }
 
-function initials(name) {
-  return String(name || '?').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+.notif-panel {
+  position: absolute;
+  top: 60px; right: 24px;
+  width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  z-index: 20;
+}
+.notif-panel-header { padding: 14px 16px; font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--border); }
+.notif-list { padding: 6px; }
+.notif-item { padding: 10px 10px; border-radius: var(--radius-sm); font-size: 12.5px; }
+.notif-item:hover { background: var(--surface-hover); }
+.notif-item.unread { background: var(--accent-dim); }
+.notif-item-time { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+/* ===================================================================
+   CONTENT / SHARED COMPONENTS
+=================================================================== */
+
+.content { flex: 1; padding: 28px; }
+
+.page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 10px; }
+.page-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+.page-sub { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  box-shadow: var(--shadow-card);
 }
 
-function renderSidebarNav() {
-  const nav = document.getElementById('sidebarNav');
-  const items = getNavGroupForRole(SESSION.role);
-  nav.innerHTML = items.map(item => `
-    <button class="nav-item ${item.id === currentView ? 'active' : ''}" data-view="${item.id}">
-      <svg>${ICONS[item.icon] || ICONS.grid}</svg>
-      <span class="nav-label">${item.label}</span>
-    </button>
-  `).join('');
+.empty-state { padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
-  nav.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentView = btn.dataset.view;
-      nav.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderView(currentView);
-    });
-  });
+/* Requisition "stamp" badge — the signature element. Uppercase, letter-spaced,
+   double-bordered like a rubber stamp, slight rotation on approved/rejected. */
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 3px;
+  border: 1.5px solid currentColor;
+}
+.stamp-pending { color: var(--amber); background: var(--amber-dim); }
+.stamp-approved { color: var(--green); background: var(--green-dim); transform: rotate(-2deg); }
+.stamp-rejected { color: var(--red); background: var(--red-dim); transform: rotate(-2deg); }
+.stamp-clarify { color: var(--blue); background: var(--blue-dim); }
+.stamp-completed { color: var(--accent); background: var(--accent-dim); transform: rotate(-2deg); }
 
-  document.getElementById('logoutBtn').addEventListener('click', logout);
+.mono { font-family: var(--font-mono); font-size: 12.5px; }
+
+/* Loading skeleton for instant-load feel while background refresh runs */
+.skeleton { background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius-sm); }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ===================================================================
+   RESPONSIVE
+=================================================================== */
+
+@media (max-width: 860px) {
+  .sidebar { position: fixed; z-index: 30; height: 100vh; }
+  .sidebar:not(.collapsed) { box-shadow: var(--shadow-pop); }
+  .topbar-search { display: none; }
+  .content { padding: 18px; }
 }
 
-function bindSidebarToggle() {
-  document.getElementById('sidebarToggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
-  });
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
 }
 
-// ===================================================================
-// NOTIFICATIONS
-// ===================================================================
+/* ===================================================================
+   FORM CONTROLS (select / textarea share .field input styling)
+=================================================================== */
 
-function bindNotifPanel() {
-  const btn = document.getElementById('notifBtn');
-  const panel = document.getElementById('notifPanel');
-  btn.addEventListener('click', () => panel.classList.toggle('hidden'));
-  document.addEventListener('click', (e) => {
-    if (!panel.contains(e.target) && !btn.contains(e.target)) panel.classList.add('hidden');
-  });
+.field select, .field textarea {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
+.field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.field textarea { min-height: 76px; }
+.field input:disabled { opacity: 0.6; cursor: not-allowed; }
+.field-row { display: flex; gap: 8px; align-items: flex-end; }
+.field-row input { flex: 1; min-width: 0; }
 
-function renderNotifications() {
-  const list = STATE.notifications || [];
-  const unread = list.filter(n => n.readStatus === 'Unread');
-  const badge = document.getElementById('notifBadge');
-  badge.textContent = unread.length;
-  badge.classList.toggle('hidden', unread.length === 0);
-
-  const container = document.getElementById('notifList');
-  if (!list.length) {
-    container.innerHTML = '<p class="empty-state">No notifications yet.</p>';
-    return;
-  }
-  container.innerHTML = list.slice().reverse().map(n => `
-    <div class="notif-item ${n.readStatus === 'Unread' ? 'unread' : ''}" data-id="${n.notificationId}">
-      <div>${escapeHtml(n.message)}</div>
-      <div class="notif-item-time">${formatDate(n.createdAt)}</div>
-    </div>
-  `).join('');
-
-  container.querySelectorAll('.notif-item').forEach(el => {
-    el.addEventListener('click', async () => {
-      try {
-        await Api.markNotificationRead(el.dataset.id);
-        el.classList.remove('unread');
-        const n = list.find(x => x.notificationId === el.dataset.id);
-        if (n) n.readStatus = 'Read';
-        renderNotifications();
-        if (n && n.relatedRequestId) openRequestDetail(n.relatedRequestId);
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-    });
-  });
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
 }
+.form-grid .field.span-2 { grid-column: span 2; }
+@media (max-width: 640px) { .form-grid .field.span-2 { grid-column: span 1; } }
 
-// ===================================================================
-// TOASTS
-// ===================================================================
+.form-actions { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+.form-note { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 
-function toast(message, type) {
-  const stack = document.getElementById('toastStack');
-  const el = document.createElement('div');
-  el.className = `toast ${type === 'error' ? 'toast-error' : type === 'success' ? 'toast-success' : ''}`;
-  el.textContent = message;
-  stack.appendChild(el);
-  setTimeout(() => el.remove(), 4000);
+/* ===================================================================
+   ITEM ROW REPEATER (New Request material lines)
+=================================================================== */
+
+.item-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 36px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
 }
-
-// ===================================================================
-// MODAL
-// ===================================================================
-
-function bindModal() {
-  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
-  document.getElementById('modalOverlay').addEventListener('click', (e) => {
-    if (e.target.id === 'modalOverlay') closeModal();
-  });
+.item-row select, .item-row input { width: 100%; }
+.item-row-remove {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
+.item-row-remove:hover { background: var(--red-dim); color: var(--red); }
+.item-row-remove svg { width: 16px; height: 16px; }
 
-function openModal(title, bodyHtml) {
-  document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalBody').innerHTML = bodyHtml;
-  document.getElementById('modalOverlay').classList.remove('hidden');
+/* ===================================================================
+   TABLE ACTIONS / MISC
+=================================================================== */
+
+.table-wrap { overflow-x: auto; }
+table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data-table th { text-align: left; padding: 8px; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid var(--border); }
+table.data-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+table.data-table tbody tr:hover { background: var(--surface-hover); }
+table.data-table tbody tr.clickable { cursor: pointer; }
+
+.action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar-search {
+  flex: 1; max-width: 320px; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 12px; color: var(--text-muted);
 }
+.toolbar-search input { border: none; outline: none; background: transparent; color: var(--text-primary); font-size: 13.5px; width: 100%; }
 
-function closeModal() {
-  document.getElementById('modalOverlay').classList.add('hidden');
-  document.getElementById('modalBody').innerHTML = '';
+/* ===================================================================
+   MODAL
+=================================================================== */
+
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
 }
-
-// ===================================================================
-// SMALL UTILS
-// ===================================================================
-
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+.modal {
+  width: 100%; max-width: 560px; max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
 }
-
-function formatDate(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (isNaN(d)) return String(value);
-  return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--surface); z-index: 1;
 }
+.modal-title { font-family: var(--font-display); font-size: 17px; font-weight: 700; }
+.modal-body { padding: 22px; }
 
-function stampFor(status) {
-  const map = {
-    'Pending': 'stamp-pending', 'Approved': 'stamp-approved', 'Rejected': 'stamp-rejected',
-    'Need Clarification': 'stamp-clarify', 'Completed': 'stamp-completed', 'Released': 'stamp-completed'
-  };
-  return `<span class="stamp ${map[status] || 'stamp-pending'}">${escapeHtml(status || 'Pending')}</span>`;
+/* ===================================================================
+   TOASTS
+=================================================================== */
+
+.toast-stack {
+  position: fixed; bottom: 20px; right: 20px; z-index: 60;
+  display: flex; flex-direction: column; gap: 8px;
 }
-
-function findMaterial(materialId) {
-  return getValidMaterials().find(m => m.materialId === materialId);
+.toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm); padding: 12px 16px;
+  font-size: 13px; box-shadow: var(--shadow-pop);
+  max-width: 320px; animation: toast-in 0.15s ease;
 }
-
-// ===================================================================
-// VIEW ROUTING
-// ===================================================================
-
-function renderView(view) {
-  const content = document.getElementById('content');
-  switch (view) {
-    case 'dashboard': content.innerHTML = viewDashboard(); bindDashboard(); break;
-    case 'materials': content.innerHTML = viewMaterials(); bindMaterials(); break;
-    case 'requests': content.innerHTML = viewRequests(); bindRequestRowClicks(content); break;
-    case 'newRequest': content.innerHTML = viewNewRequestForm(); bindNewRequestForm(); break;
-    case 'approvalWindows': content.innerHTML = viewApprovalWindows(); bindApprovalWindows(); break;
-    case 'activityLog': content.innerHTML = viewActivityLogShell(); loadActivityLog(); break;
-    case 'users': content.innerHTML = viewUsersShell(); loadUsers(); break;
-    case 'settings': content.innerHTML = viewSettings(); bindSettings(); break;
-    default: content.innerHTML = '';
-  }
-}
-
-// ===================================================================
-// DASHBOARD
-// ===================================================================
-
-function viewDashboard() {
-  const total = STATE.requests.length;
-  const pending = STATE.requests.filter(r => r.overallStatus === 'Pending').length;
-  const approved = STATE.requests.filter(r => r.overallStatus === 'Approved').length;
-  const completed = STATE.requests.filter(r => r.overallStatus === 'Completed').length;
-
-  return `
-    <div class="page-header">
-      <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Welcome back, ${escapeHtml(SESSION.fullName || SESSION.userId)}</p></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
-      ${kpiCard('Total Requests', total)}
-      ${kpiCard('Pending', pending)}
-      ${kpiCard('Approved', approved)}
-      ${kpiCard('Completed', completed)}
-    </div>
-    <div class="card" style="margin-top:20px;">
-      <h3 style="font-size:14px;margin-bottom:12px;">Recent Requests</h3>
-      ${renderRequestRows(STATE.requests.slice(-8).reverse())}
-    </div>
-  `;
-}
-
-function bindDashboard() {
-  bindRequestRowClicks(document.getElementById('content'));
-}
-
-function kpiCard(label, value) {
-  return `<div class="card"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${label}</div><div style="font-family:var(--font-display);font-size:26px;font-weight:700;">${value}</div></div>`;
-}
-
-// ===================================================================
-// MATERIALS
-// ===================================================================
-
-function getValidMaterials() {
-  // Defensive filter: the materials source can include blank/empty rows
-  // (e.g. formatted-but-empty rows in the backing sheet). Only keep rows
-  // that actually have a material ID and name.
-  return (STATE.materials || []).filter(m =>
-    m && String(m.materialId || '').trim() !== '' && String(m.materialName || '').trim() !== ''
-  );
-}
-
-function viewMaterials() {
-  const rows = getValidMaterials().map(m => {
-    const available = (m.availableStock !== undefined && m.availableStock !== '')
-      ? m.availableStock
-      : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
-    return `
-      <tr>
-        <td class="mono">${escapeHtml(m.materialId)}</td>
-        <td>${escapeHtml(m.materialName)}</td>
-        <td>${escapeHtml(m.category)}</td>
-        <td>${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(m.status || 'Active')}</td>
-        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}">Edit</button></td>` : ''}
-      </tr>
-    `;
-  }).join('');
-
-  return `
-    <div class="page-header">
-      <h1 class="page-title">Materials & Inventory</h1>
-      ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="matAddBtn">+ Add Material</button>` : ''}
-    </div>
-    <div class="card table-wrap">
-      <table class="data-table">
-        <thead><tr>
-          <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
-        </tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty-state">No materials yet.</td></tr>`}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-function bindMaterials() {
-  if (!isAdmin()) return;
-  const addBtn = document.getElementById('matAddBtn');
-  if (addBtn) addBtn.addEventListener('click', () => openMaterialModal(null));
-  document.querySelectorAll('.mat-edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => openMaterialModal(findMaterial(btn.dataset.id)));
-  });
-}
-
-function openMaterialModal(material) {
-  const isEdit = !!material;
-  openModal(isEdit ? 'Edit Material' : 'Add Material', `
-    <div class="form-grid">
-      <div class="field"><span class="field-label">Category</span><input id="matCategory" value="${escapeHtml(material?.category || '')}"></div>
-      <div class="field"><span class="field-label">Material Name</span><input id="matName" value="${escapeHtml(material?.materialName || '')}"></div>
-      <div class="field"><span class="field-label">Unit</span><input id="matUnit" value="${escapeHtml(material?.unit || '')}" placeholder="pcs, box, roll..."></div>
-      <div class="field"><span class="field-label">Current Stock</span><input id="matStock" type="number" value="${escapeHtml(material?.currentStock ?? 0)}"></div>
-      <div class="field"><span class="field-label">Reorder Level</span><input id="matReorder" type="number" value="${escapeHtml(material?.reorderLevel ?? 0)}"></div>
-      <div class="field">
-        <span class="field-label">Status</span>
-        <select id="matStatus">
-          <option value="Active" ${material?.status === 'Active' || !material ? 'selected' : ''}>Active</option>
-          <option value="Inactive" ${material?.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
-        </select>
-      </div>
-    </div>
-    <p class="login-error" id="matModalError"></p>
-    <div class="form-actions">
-      <button class="btn btn-primary" id="matSaveBtn">${isEdit ? 'Save Changes' : 'Add Material'}</button>
-      <button class="btn btn-ghost" id="matCancelBtn">Cancel</button>
-    </div>
-  `);
-
-  document.getElementById('matCancelBtn').addEventListener('click', closeModal);
-  document.getElementById('matSaveBtn').addEventListener('click', async () => {
-    const errorEl = document.getElementById('matModalError');
-    const payload = {
-      materialId: material ? material.materialId : '',
-      category: document.getElementById('matCategory').value.trim(),
-      materialName: document.getElementById('matName').value.trim(),
-      unit: document.getElementById('matUnit').value.trim(),
-      currentStock: Number(document.getElementById('matStock').value || 0),
-      reorderLevel: Number(document.getElementById('matReorder').value || 0),
-      status: document.getElementById('matStatus').value,
-      actorUserId: SESSION.userId
-    };
-    if (!payload.materialName || !payload.unit) {
-      errorEl.textContent = 'Material name and unit are required.';
-      return;
-    }
-    try {
-      await Api.upsertMaterial(payload);
-      closeModal();
-      toast('Material saved.', 'success');
-      refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-    } catch (err) {
-      errorEl.textContent = err.message;
-    }
-  });
-}
-
-// ===================================================================
-// REQUESTS LIST + DETAIL
-// ===================================================================
-
-function viewRequests() {
-  return `
-    <div class="page-header"><h1 class="page-title">Requests</h1></div>
-    <div class="card table-wrap">${renderRequestRows(STATE.requests.slice().reverse())}</div>
-  `;
-}
-
-function renderRequestRows(requests) {
-  if (!requests.length) return `<p class="empty-state">No requests yet.</p>`;
-  return `
-    <table class="data-table">
-      <thead><tr>
-        <th>Request ID</th><th>Store</th><th>Type</th><th>Status</th><th>Submitted</th>
-      </tr></thead>
-      <tbody>
-        ${requests.map(r => `
-          <tr class="clickable" data-request-id="${escapeHtml(r.requestId)}">
-            <td class="mono">${escapeHtml(r.requestId)}</td>
-            <td>${escapeHtml(r.storeName)}</td>
-            <td>${escapeHtml(r.requestType)}</td>
-            <td>${stampFor(r.overallStatus)}</td>
-            <td>${formatDate(r.timestamp)}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-  `;
-}
-
-function bindRequestRowClicks(scope) {
-  scope.querySelectorAll('tr[data-request-id]').forEach(row => {
-    row.addEventListener('click', () => openRequestDetail(row.dataset.requestId));
-  });
-}
-
-async function openRequestDetail(requestId) {
-  openModal(requestId, `<p class="empty-state">Loading...</p>`);
-  try {
-    const detail = await Api.getRequestDetail(requestId);
-    renderRequestDetailModal(detail);
-  } catch (err) {
-    document.getElementById('modalBody').innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
-  }
-}
-
-function renderRequestDetailModal(detail) {
-  const { request, items, timeline } = detail;
-  if (!request) {
-    document.getElementById('modalBody').innerHTML = `<p class="empty-state">Request not found.</p>`;
-    return;
-  }
-  document.getElementById('modalTitle').textContent = request.requestId;
-
-  const itemRows = items.map(item => {
-    const material = findMaterial(item.materialId);
-    const name = material ? material.materialName : item.materialId;
-    const canAct = canReviewRequests() && item.itemStatus === 'Pending' && request.currentStage === 'BTL Review';
-    return `
-      <tr data-item-id="${escapeHtml(item.itemId)}">
-        <td>${escapeHtml(name)}</td>
-        <td>${escapeHtml(item.qtyRequested)}</td>
-        <td>${item.qtyApproved !== '' && item.qtyApproved !== undefined ? escapeHtml(item.qtyApproved) : '—'}</td>
-        <td>${stampFor(item.itemStatus)}</td>
-        <td>${escapeHtml(item.btlRemarks || '—')}</td>
-        <td>
-          ${canAct ? `
-            <div class="action-btns">
-              <input type="number" class="item-qty-input" placeholder="Qty" value="${escapeHtml(item.qtyRequested)}" style="width:64px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elevated);color:var(--text-primary);">
-              <button class="btn btn-primary btn-sm item-approve-btn">Approve</button>
-              <button class="btn btn-danger btn-sm item-reject-btn">Reject</button>
-              <button class="btn btn-secondary btn-sm item-clarify-btn">Clarify</button>
-            </div>
-          ` : ''}
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  const timelineHtml = timeline.slice().reverse().map(t => `
-    <div class="timeline-item">
-      <div class="timeline-dot"></div>
-      <div>
-        <div class="timeline-content"><strong>${escapeHtml(t.action)}</strong> — ${escapeHtml(t.remarks || '')}</div>
-        <div class="timeline-meta">${escapeHtml(t.actorUserId)} · ${escapeHtml(t.stage)} · ${formatDate(t.timestamp)}</div>
-      </div>
-    </div>
-  `).join('');
-
-  const allReviewed = items.every(i => i.itemStatus !== 'Pending');
-  const showFinalize = canReviewRequests() && request.currentStage === 'BTL Review' && allReviewed && items.length > 0;
-  const showRelease = canReleaseRequests() && request.overallStatus === 'Approved';
-
-  document.getElementById('modalBody').innerHTML = `
-    <div class="form-grid">
-      <div class="field"><span class="field-label">Store</span><input disabled value="${escapeHtml(request.storeName)}"></div>
-      <div class="field"><span class="field-label">Region</span><input disabled value="${escapeHtml(request.region)}"></div>
-      <div class="field"><span class="field-label">Requested By</span><input disabled value="${escapeHtml(request.requestorUserId)}"></div>
-      <div class="field"><span class="field-label">Type</span><input disabled value="${escapeHtml(request.requestType)}"></div>
-      <div class="field span-2"><span class="field-label">Purpose</span><input disabled value="${escapeHtml(request.purpose)}"></div>
-      <div class="field span-2"><span class="field-label">Reason</span><input disabled value="${escapeHtml(request.reason)}"></div>
-      <div class="field"><span class="field-label">Status</span><div style="padding-top:6px;">${stampFor(request.overallStatus)}</div></div>
-      <div class="field"><span class="field-label">Stage</span><input disabled value="${escapeHtml(request.currentStage)}"></div>
-    </div>
-
-    <div class="section-title">Line Items</div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>Material</th><th>Qty Req.</th><th>Qty Appr.</th><th>Status</th><th>Remarks</th><th></th></tr></thead>
-        <tbody>${itemRows || `<tr><td colspan="6" class="empty-state">No items.</td></tr>`}</tbody>
-      </table>
-    </div>
-
-    ${showFinalize ? `
-      <div class="section-title">Finalize Review</div>
-      <div class="field-row">
-        <div class="field">
-          <span class="field-label">Overall Decision</span>
-          <select id="finalizeStatus">
-            <option value="Approved">Approved</option>
-            <option value="Need Clarification">Need Clarification</option>
-            <option value="Rejected">Rejected</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" id="finalizeBtn">Finalize</button>
-      </div>
-    ` : ''}
-
-    ${showRelease ? `
-      <div class="section-title">Release to Requestor</div>
-      <div class="field-row">
-        <div class="field"><span class="field-label">Tracking Info (courier, plate no, etc.)</span><input id="trackingInfo" placeholder="Optional"></div>
-        <button class="btn btn-primary" id="releaseBtn">Mark Released</button>
-      </div>
-    ` : ''}
-
-    <div class="section-title">Timeline</div>
-    <div class="timeline">${timelineHtml || '<p class="empty-state">No activity yet.</p>'}</div>
-  `;
-
-  bindRequestDetailActions(request.requestId);
-}
-
-function bindRequestDetailActions(requestId) {
-  document.querySelectorAll('.item-approve-btn, .item-reject-btn, .item-clarify-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const row = e.target.closest('tr');
-      const itemId = row.dataset.itemId;
-      const qtyInput = row.querySelector('.item-qty-input');
-      const decision = btn.classList.contains('item-approve-btn') ? 'Approved'
-        : btn.classList.contains('item-reject-btn') ? 'Rejected' : 'Need Clarification';
-      const remarks = decision !== 'Approved' ? (prompt('Remarks (optional):') || '') : '';
-      btn.disabled = true;
-      try {
-        await Api.reviewRequestItem({
-          itemId, decision, qtyApproved: qtyInput ? qtyInput.value : '', remarks, actorUserId: SESSION.userId
-        });
-        toast('Item updated.', 'success');
-        openRequestDetail(requestId);
-      } catch (err) {
-        toast(err.message, 'error');
-        btn.disabled = false;
-      }
-    });
-  });
-
-  const finalizeBtn = document.getElementById('finalizeBtn');
-  if (finalizeBtn) {
-    finalizeBtn.addEventListener('click', async () => {
-      const overallStatus = document.getElementById('finalizeStatus').value;
-      finalizeBtn.disabled = true;
-      try {
-        await Api.finalizeRequestReview({ requestId, overallStatus, remarks: '', actorUserId: SESSION.userId });
-        toast('Request finalized.', 'success');
-        closeModal();
-        refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-      } catch (err) {
-        toast(err.message, 'error');
-        finalizeBtn.disabled = false;
-      }
-    });
-  }
-
-  const releaseBtn = document.getElementById('releaseBtn');
-  if (releaseBtn) {
-    releaseBtn.addEventListener('click', async () => {
-      const trackingInfo = document.getElementById('trackingInfo').value.trim();
-      releaseBtn.disabled = true;
-      try {
-        await Api.releaseRequest({ requestId, trackingInfo, actorUserId: SESSION.userId });
-        toast('Request released.', 'success');
-        closeModal();
-        refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-      } catch (err) {
-        toast(err.message, 'error');
-        releaseBtn.disabled = false;
-      }
-    });
-  }
-}
-
-// ===================================================================
-// NEW REQUEST FORM
-// ===================================================================
-
-function viewNewRequestForm() {
-  const openWindows = (STATE.approvalWindows || []).filter(w => w.status === 'Open');
-  return `
-    <div class="page-header"><h1 class="page-title">New Request</h1></div>
-    <div class="card">
-      <div class="section-title">Shop Details</div>
-      <div class="form-grid">
-        <div class="field">
-          <span class="field-label">Shop ID</span>
-          <div class="field-row">
-            <input id="nrShopId" placeholder="e.g. PH003980">
-            <button type="button" class="btn btn-secondary btn-sm" id="nrLookupBtn">Lookup</button>
-          </div>
-        </div>
-        <div class="field"><span class="field-label">Store Name</span><input id="nrStoreName" disabled></div>
-        <div class="field"><span class="field-label">Region</span><input id="nrRegion" disabled></div>
-        <div class="field"><span class="field-label">Responsible RSS</span><input id="nrRssName" disabled></div>
-        <div class="field"><span class="field-label">Contact Number</span><input id="nrContact" placeholder="09xxxxxxxxx"></div>
-        <div class="field">
-          <span class="field-label">Request Type</span>
-          <select id="nrType">${REQUEST_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
-        </div>
-        ${openWindows.length ? `
-        <div class="field">
-          <span class="field-label">Approval Window (optional)</span>
-          <select id="nrWindow">
-            <option value="">— None —</option>
-            ${openWindows.map(w => `<option value="${escapeHtml(w.windowId)}">${escapeHtml(w.windowName)}</option>`).join('')}
-          </select>
-        </div>` : ''}
-        <div class="field span-2"><span class="field-label">Purpose</span><textarea id="nrPurpose" placeholder="What is this request for?"></textarea></div>
-        <div class="field span-2"><span class="field-label">Reason</span><textarea id="nrReason" placeholder="Why is it needed?"></textarea></div>
-        <div class="field span-2"><span class="field-label">Photo Links (optional, comma-separated URLs)</span><input id="nrPhotoLinks" placeholder="https://..."></div>
-      </div>
-
-      <div class="section-title">Materials Requested</div>
-      <div id="nrItemsContainer"></div>
-      <button type="button" class="btn btn-secondary btn-sm" id="nrAddItemBtn">+ Add material</button>
-
-      <p class="login-error" id="nrError"></p>
-      <div class="form-actions">
-        <button type="button" class="btn btn-primary" id="nrSubmitBtn">Submit Request</button>
-      </div>
-    </div>
-  `;
-}
-
-function bindNewRequestForm() {
-  itemRowSeq = 0;
-  const container = document.getElementById('nrItemsContainer');
-  addNewRequestItemRow(container);
-
-  document.getElementById('nrAddItemBtn').addEventListener('click', () => addNewRequestItemRow(container));
-
-  document.getElementById('nrLookupBtn').addEventListener('click', async () => {
-    const shopId = document.getElementById('nrShopId').value.trim();
-    const errorEl = document.getElementById('nrError');
-    errorEl.textContent = '';
-    if (!shopId) { errorEl.textContent = 'Enter a Shop ID first.'; return; }
-    try {
-      const shop = await Api.lookupShop(shopId);
-      document.getElementById('nrStoreName').value = shop.storeName || '';
-      document.getElementById('nrRegion').value = shop.region || '';
-      document.getElementById('nrRssName').value = shop.rssName || '';
-      toast('Shop found.', 'success');
-    } catch (err) {
-      errorEl.textContent = err.message;
-    }
-  });
-
-  document.getElementById('nrSubmitBtn').addEventListener('click', submitNewRequest);
-}
-
-function addNewRequestItemRow(container) {
-  const rowId = `nrItem${itemRowSeq++}`;
-  const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
-  const row = document.createElement('div');
-  row.className = 'item-row';
-  row.id = rowId;
-  row.innerHTML = `
-    <select class="nr-item-material">
-      <option value="">— Select material —</option>
-      ${activeMaterials.map(m => `<option value="${escapeHtml(m.materialId)}">${escapeHtml(m.materialName)} (${escapeHtml(m.unit)})</option>`).join('')}
-    </select>
-    <input type="number" class="nr-item-qty" placeholder="Qty" min="1">
-    <button type="button" class="item-row-remove" aria-label="Remove"><svg viewBox="0 0 24 24">TRASHICON</svg></button>
-  `.replace('TRASHICON', ICONS.trash);
-  row.querySelector('.item-row-remove').addEventListener('click', () => row.remove());
-  container.appendChild(row);
-}
-
-async function submitNewRequest() {
-  const errorEl = document.getElementById('nrError');
-  errorEl.textContent = '';
-
-  const shopId = document.getElementById('nrShopId').value.trim();
-  const storeName = document.getElementById('nrStoreName').value.trim();
-  const region = document.getElementById('nrRegion').value.trim();
-  const rssName = document.getElementById('nrRssName').value.trim();
-  const contactNumber = document.getElementById('nrContact').value.trim();
-  const requestType = document.getElementById('nrType').value;
-  const purpose = document.getElementById('nrPurpose').value.trim();
-  const reason = document.getElementById('nrReason').value.trim();
-  const photoLinks = document.getElementById('nrPhotoLinks').value.trim();
-  const windowEl = document.getElementById('nrWindow');
-  const approvalWindowId = windowEl ? windowEl.value : '';
-
-  if (!shopId || !storeName) { errorEl.textContent = 'Look up a valid Shop ID first.'; return; }
-  if (!purpose || !reason) { errorEl.textContent = 'Purpose and reason are required.'; return; }
-
-  const items = [];
-  document.querySelectorAll('#nrItemsContainer .item-row').forEach(row => {
-    const materialId = row.querySelector('.nr-item-material').value;
-    const qty = Number(row.querySelector('.nr-item-qty').value || 0);
-    if (materialId && qty > 0) items.push({ materialId, qty });
-  });
-  if (!items.length) { errorEl.textContent = 'Add at least one material with a valid quantity.'; return; }
-
-  const btn = document.getElementById('nrSubmitBtn');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-  try {
-    const result = await Api.submitRequest({
-      shopId, storeName, region, rssName, requestorUserId: SESSION.userId, contactNumber,
-      requestType, purpose, reason, photoLinks, approvalWindowId, items
-    });
-    toast(`Request ${result.requestId} submitted.`, 'success');
-    currentView = 'dashboard';
-    renderSidebarNav();
-    await refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-  } catch (err) {
-    errorEl.textContent = err.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Submit Request';
-  }
-}
-
-// ===================================================================
-// APPROVAL WINDOWS
-// ===================================================================
-
-function viewApprovalWindows() {
-  const rows = (STATE.approvalWindows || []).slice().reverse().map(w => `
-    <tr>
-      <td class="mono">${escapeHtml(w.windowId)}</td>
-      <td>${escapeHtml(w.windowName)}</td>
-      <td>${formatDate(w.startDate)}</td>
-      <td>${formatDate(w.endDate)}</td>
-      <td>${escapeHtml(w.status)}</td>
-      <td>${escapeHtml(w.createdBy)}</td>
-    </tr>
-  `).join('');
-
-  return `
-    <div class="page-header"><h1 class="page-title">Approval Windows</h1></div>
-    ${isAdmin() ? `
-    <div class="card" style="margin-bottom:20px;">
-      <div class="section-title">Create New Window</div>
-      <div class="form-grid">
-        <div class="field"><span class="field-label">Window Name</span><input id="awName" placeholder="e.g. Q3 2026 Store Refresh"></div>
-        <div class="field"><span class="field-label">Start Date</span><input id="awStart" type="date"></div>
-        <div class="field"><span class="field-label">End Date</span><input id="awEnd" type="date"></div>
-      </div>
-      <p class="login-error" id="awError"></p>
-      <div class="form-actions"><button class="btn btn-primary" id="awCreateBtn">Create Window</button></div>
-    </div>` : ''}
-    <div class="card table-wrap">
-      <table class="data-table">
-        <thead><tr><th>ID</th><th>Name</th><th>Start</th><th>End</th><th>Status</th><th>Created By</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No approval windows yet.</td></tr>`}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-function bindApprovalWindows() {
-  const btn = document.getElementById('awCreateBtn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    const errorEl = document.getElementById('awError');
-    const windowName = document.getElementById('awName').value.trim();
-    const startDate = document.getElementById('awStart').value;
-    const endDate = document.getElementById('awEnd').value;
-    if (!windowName || !startDate || !endDate) {
-      errorEl.textContent = 'All fields are required.';
-      return;
-    }
-    btn.disabled = true;
-    try {
-      await Api.createApprovalWindow({ windowName, startDate, endDate, actorUserId: SESSION.userId });
-      toast('Approval window created.', 'success');
-      await refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-    } catch (err) {
-      errorEl.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
-// ===================================================================
-// ACTIVITY LOG
-// ===================================================================
-
-function viewActivityLogShell() {
-  return `
-    <div class="page-header"><h1 class="page-title">Activity Logs</h1></div>
-    <div class="toolbar">
-      <div class="toolbar-search">
-        <input id="logSearch" placeholder="Filter by user, action, or target...">
-      </div>
-    </div>
-    <div class="card table-wrap" id="logTableWrap"><p class="empty-state">Loading...</p></div>
-  `;
-}
-
-async function loadActivityLog() {
-  const wrap = document.getElementById('logTableWrap');
-  try {
-    const logs = await Api.getActivityLog(300);
-    renderActivityLogTable(logs.slice().reverse());
-    const search = document.getElementById('logSearch');
-    if (search) {
-      search.addEventListener('input', () => {
-        const q = search.value.trim().toLowerCase();
-        const filtered = logs.slice().reverse().filter(l =>
-          [l.userId, l.role, l.action, l.targetType, l.targetId, l.details].join(' ').toLowerCase().includes(q)
-        );
-        renderActivityLogTable(filtered);
-      });
-    }
-  } catch (err) {
-    wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
-  }
-}
-
-function renderActivityLogTable(logs) {
-  const wrap = document.getElementById('logTableWrap');
-  if (!wrap) return;
-  const rows = logs.map(l => `
-    <tr>
-      <td>${formatDate(l.timestamp)}</td>
-      <td class="mono">${escapeHtml(l.userId)}</td>
-      <td>${escapeHtml(l.role)}</td>
-      <td>${escapeHtml(l.action)}</td>
-      <td>${escapeHtml(l.targetType)}</td>
-      <td class="mono">${escapeHtml(l.targetId)}</td>
-      <td>${escapeHtml(l.details)}</td>
-    </tr>
-  `).join('');
-  wrap.innerHTML = `
-    <table class="data-table">
-      <thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Target Type</th><th>Target ID</th><th>Details</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No activity found.</td></tr>`}</tbody>
-    </table>
-  `;
-}
-
-// ===================================================================
-// USERS (Admin)
-// ===================================================================
-
-let USERS_CACHE = [];
-
-function viewUsersShell() {
-  return `
-    <div class="page-header">
-      <h1 class="page-title">User Management</h1>
-      <button class="btn btn-primary btn-sm" id="userAddBtn">+ Add User</button>
-    </div>
-    <div class="card table-wrap" id="usersTableWrap"><p class="empty-state">Loading...</p></div>
-  `;
-}
-
-async function loadUsers() {
-  const wrap = document.getElementById('usersTableWrap');
-  document.getElementById('userAddBtn').addEventListener('click', () => openUserModal(null));
-  try {
-    USERS_CACHE = await Api.getPersonnel();
-    renderUsersTable();
-  } catch (err) {
-    wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
-  }
-}
-
-function renderUsersTable() {
-  const wrap = document.getElementById('usersTableWrap');
-  const rows = USERS_CACHE.map(u => `
-    <tr>
-      <td class="mono">${escapeHtml(u.rssUserId)}</td>
-      <td>${escapeHtml(u.fullName)}</td>
-      <td>${escapeHtml(u.position)}</td>
-      <td>${escapeHtml(u.region)}</td>
-      <td>${escapeHtml(u.pinStatus || 'Active')}</td>
-      <td>${formatDate(u.lastLogin)}</td>
-      <td>
-        <div class="action-btns">
-          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}">Edit</button>
-          <button class="btn btn-secondary btn-sm user-reset-btn" data-id="${escapeHtml(u.rssUserId)}">Reset PIN</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-  wrap.innerHTML = `
-    <table class="data-table">
-      <thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>Region</th><th>PIN Status</th><th>Last Login</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No users found.</td></tr>`}</tbody>
-    </table>
-  `;
-  document.querySelectorAll('.user-edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => openUserModal(USERS_CACHE.find(u => u.rssUserId === btn.dataset.id)));
-  });
-  document.querySelectorAll('.user-reset-btn').forEach(btn => {
-    btn.addEventListener('click', () => openResetPinModal(btn.dataset.id));
-  });
-}
-
-function openUserModal(user) {
-  const isEdit = !!user;
-  const roleOptions = Object.values(ROLES);
-  openModal(isEdit ? 'Edit User' : 'Add User', `
-    <div class="form-grid">
-      <div class="field"><span class="field-label">User ID</span><input id="uUserId" value="${escapeHtml(user ? user.rssUserId : '')}" ${isEdit ? 'disabled' : ''}></div>
-      <div class="field"><span class="field-label">Full Name</span><input id="uFullName" value="${escapeHtml(user ? user.fullName : '')}"></div>
-      <div class="field">
-        <span class="field-label">Role</span>
-        <select id="uRole">${roleOptions.map(r => `<option value="${r}" ${user && user.position === r ? 'selected' : ''}>${r}</option>`).join('')}</select>
-      </div>
-      <div class="field"><span class="field-label">Region</span><input id="uRegion" value="${escapeHtml(user ? user.region : '')}"></div>
-      <div class="field span-2"><span class="field-label">Contact Number</span><input id="uContact" value="${escapeHtml(user ? user.contactNumber : '')}"></div>
-    </div>
-    ${!isEdit ? `<p class="form-note">New users log in for the first time using their User ID as the PIN.</p>` : ''}
-    <p class="login-error" id="uModalError"></p>
-    <div class="form-actions">
-      <button class="btn btn-primary" id="uSaveBtn">${isEdit ? 'Save Changes' : 'Add User'}</button>
-      <button class="btn btn-ghost" id="uCancelBtn">Cancel</button>
-    </div>
-  `);
-
-  document.getElementById('uCancelBtn').addEventListener('click', closeModal);
-  document.getElementById('uSaveBtn').addEventListener('click', async () => {
-    const errorEl = document.getElementById('uModalError');
-    const payload = {
-      rssUserId: document.getElementById('uUserId').value.trim(),
-      fullName: document.getElementById('uFullName').value.trim(),
-      position: document.getElementById('uRole').value,
-      region: document.getElementById('uRegion').value.trim(),
-      contactNumber: document.getElementById('uContact').value.trim(),
-      actorUserId: SESSION.userId
-    };
-    if (!payload.rssUserId || !payload.fullName) {
-      errorEl.textContent = 'User ID and full name are required.';
-      return;
-    }
-    try {
-      await Api.upsertPersonnel(payload);
-      closeModal();
-      toast('User saved.', 'success');
-      loadUsers();
-    } catch (err) {
-      errorEl.textContent = err.message;
-    }
-  });
-}
-
-function openResetPinModal(targetUserId) {
-  openModal('Reset PIN', `
-    <p class="form-note">This resets ${escapeHtml(targetUserId)}'s PIN. They'll use the new PIN on their next login.</p>
-    <div class="field"><span class="field-label">New PIN</span><input id="rpNewPin" type="text" placeholder="Leave blank to reset to User ID"></div>
-    <p class="login-error" id="rpError"></p>
-    <div class="form-actions">
-      <button class="btn btn-primary" id="rpSaveBtn">Reset PIN</button>
-      <button class="btn btn-ghost" id="rpCancelBtn">Cancel</button>
-    </div>
-  `);
-  document.getElementById('rpCancelBtn').addEventListener('click', closeModal);
-  document.getElementById('rpSaveBtn').addEventListener('click', async () => {
-    const errorEl = document.getElementById('rpError');
-    const newPin = document.getElementById('rpNewPin').value.trim() || targetUserId;
-    try {
-      await Api.resetPin(targetUserId, newPin, SESSION.userId);
-      closeModal();
-      toast('PIN reset.', 'success');
-      loadUsers();
-    } catch (err) {
-      errorEl.textContent = err.message;
-    }
-  });
-}
-
-// ===================================================================
-// SETTINGS
-// ===================================================================
-
-function viewSettings() {
-  return `
-    <div class="page-header"><h1 class="page-title">Settings</h1></div>
-    <div class="card" style="margin-bottom:20px;">
-      <div class="section-title">Profile</div>
-      <div class="form-grid">
-        <div class="field"><span class="field-label">User ID</span><input disabled value="${escapeHtml(SESSION.userId)}"></div>
-        <div class="field"><span class="field-label">Full Name</span><input disabled value="${escapeHtml(SESSION.fullName || '—')}"></div>
-        <div class="field"><span class="field-label">Role</span><input disabled value="${escapeHtml(SESSION.role)}"></div>
-        <div class="field"><span class="field-label">Region</span><input disabled value="${escapeHtml(SESSION.region || '—')}"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="section-title">Change PIN</div>
-      <div class="form-grid">
-        <div class="field"><span class="field-label">Current PIN</span><input id="stCurrentPin" type="password"></div>
-        <div class="field"><span class="field-label">New PIN</span><input id="stNewPin" type="password"></div>
-        <div class="field"><span class="field-label">Confirm New PIN</span><input id="stConfirmPin" type="password"></div>
-      </div>
-      <p class="login-error" id="stError"></p>
-      <div class="form-actions"><button class="btn btn-primary" id="stSaveBtn">Update PIN</button></div>
-    </div>
-  `;
-}
-
-function bindSettings() {
-  document.getElementById('stSaveBtn').addEventListener('click', async () => {
-    const errorEl = document.getElementById('stError');
-    errorEl.textContent = '';
-    const currentPin = document.getElementById('stCurrentPin').value.trim();
-    const newPin = document.getElementById('stNewPin').value.trim();
-    const confirmPin = document.getElementById('stConfirmPin').value.trim();
-
-    if (!currentPin || !newPin) { errorEl.textContent = 'Fill in all fields.'; return; }
-    if (newPin !== confirmPin) { errorEl.textContent = 'New PIN and confirmation do not match.'; return; }
-
-    const btn = document.getElementById('stSaveBtn');
-    btn.disabled = true;
-    try {
-      await Api.login(SESSION.userId, currentPin);
-      await Api.resetPin(SESSION.userId, newPin, SESSION.userId);
-      toast('PIN updated.', 'success');
-      document.getElementById('stCurrentPin').value = '';
-      document.getElementById('stNewPin').value = '';
-      document.getElementById('stConfirmPin').value = '';
-    } catch (err) {
-      errorEl.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
+.toast.toast-error { border-left-color: var(--red); }
+.toast.toast-success { border-left-color: var(--green); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ===================================================================
+   TIMELINE (Request detail)
+=================================================================== */
+
+.timeline { display: flex; flex-direction: column; gap: 14px; margin-top: 6px; }
+.timeline-item { display: flex; gap: 12px; }
+.timeline-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+.timeline-content { font-size: 13px; }
+.timeline-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.section-title { font-size: 14px; font-weight: 600; margin: 22px 0 12px; }
+.section-title:first-child { margin-top: 0; }
