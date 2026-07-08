@@ -64,9 +64,12 @@ const SheetsClient = {
   async batchGetObjects(tabNames) {
     const ranges = tabNames.map(t => `${t}!A:Z`);
     const query = ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet?${query}&key=${CONFIG.SHEETS_API_KEY}`;
+    // _ts busts browser/edge caching on this GET — without it, identical
+    // requests (e.g. the getLastUpdate poll) can return a stale cached
+    // response, making the app think nothing changed after a write.
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet?${query}&key=${CONFIG.SHEETS_API_KEY}&_ts=${Date.now()}`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { cache: 'no-store' });
     const json = await res.json();
     if (!res.ok) throw new Error((json.error && json.error.message) || 'Sheets API request failed.');
 
@@ -94,8 +97,8 @@ const SheetsClient = {
     if (!target) throw new Error('Shop ID is required.');
 
     const range = `${SHEET_TABS.STORE_LIST}!A2:H`;
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${encodeURIComponent(range)}?key=${CONFIG.SHEETS_API_KEY}`;
-    const res = await fetch(url);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values/${encodeURIComponent(range)}?key=${CONFIG.SHEETS_API_KEY}&_ts=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
     const json = await res.json();
     if (!res.ok) throw new Error((json.error && json.error.message) || 'Sheets API request failed.');
 
