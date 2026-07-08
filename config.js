@@ -5,6 +5,13 @@
 const CONFIG = {
   WEB_APP_URL: 'https://script.google.com/macros/s/AKfycbwiATjZ37tZ6rHgySVIo_v1DIvA2wEfcOoBeEp4ULOqAVF1DATN-xVp00NH7HpOYsOAdA/exec',
 
+  // Direct Google Sheets API access (read-only). Used for high-frequency reads
+  // (materials, requests, notifications, activity log, bootstrap, shop lookup)
+  // to avoid Apps Script Web App cold-start latency. Writes and anything
+  // touching PERSONEL LIST (which holds PINs) still go through WEB_APP_URL.
+  SHEETS_API_KEY: 'AIzaSyCbcpSYWw8bIeyZxq-f3XKdMzo8VVVJu8w',
+  SPREADSHEET_ID: '1R2MPf0TWJPJ89VC13qxfStyel3dSrcB1x-0pY1Gkpm0',
+
   // Fallback poll interval in ms if CONFIG sheet value can't be read yet.
   DEFAULT_POLL_INTERVAL_MS: 8000,
 
