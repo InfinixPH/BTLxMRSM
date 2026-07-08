@@ -43,17 +43,21 @@ const NAV_BY_ROLE = {
     { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
     { id: 'requests', label: 'Requests to Review', icon: 'list' },
     { id: 'materials', label: 'Materials & Inventory', icon: 'box' },
-    { id: 'activityLog', label: 'Activity Logs', icon: 'clock' }
+    { id: 'approvalWindows', label: 'Approval Windows', icon: 'calendar' },
+    { id: 'activityLog', label: 'Activity Logs', icon: 'clock' },
+    { id: 'settings', label: 'Settings', icon: 'settings' }
   ],
   [ROLES.WAREHOUSE]: [
     { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
     { id: 'requests', label: 'Approved Requests', icon: 'list' },
-    { id: 'materials', label: 'Materials & Inventory', icon: 'box' }
+    { id: 'materials', label: 'Materials & Inventory', icon: 'box' },
+    { id: 'settings', label: 'Settings', icon: 'settings' }
   ],
   REQUESTOR: [
     { id: 'dashboard', label: 'My Requests', icon: 'grid' },
     { id: 'materials', label: 'Materials Catalog', icon: 'box' },
-    { id: 'newRequest', label: 'New Request', icon: 'plus' }
+    { id: 'newRequest', label: 'New Request', icon: 'plus' },
+    { id: 'settings', label: 'Settings', icon: 'settings' }
   ]
 };
 
