@@ -1,8 +1,17 @@
 /**
  * BTL x MRMS — API LAYER
- * Wraps calls to the Apps Script Web App following the calling convention
- * documented in Code.gs: GET for reads, POST with text/plain body for writes
- * (avoids CORS preflight, which Apps Script Web Apps don't support).
+ * -----------------------------------------------------------------
+ * Two backends now:
+ *   1. WEB_APP_URL (Apps Script) — login, resetPin, getPersonnel, and every
+ *      write. Kept here because Code.gs owns PIN verification/stripping and
+ *      LockService-guarded stock math. See sheets-client.js header for why.
+ *   2. Direct Google Sheets API (via SheetsClient, read-only API key) — every
+ *      other read. This is what used to be slow; a direct API call skips
+ *      Apps Script's cold-start entirely.
+ *
+ * Every Api.* method below keeps its original name/signature, so app.js
+ * needs zero changes — only where the data comes from changed.
+ * -----------------------------------------------------------------
  */
 
 const Api = {
@@ -25,23 +34,72 @@ const Api = {
     return json.data;
   },
 
-  // ---- Auth ----
+  /** Mirrors getRequestsForUser_ in Code.gs: full visibility for Admin/BTL/Warehouse, own-only otherwise. */
+  _filterRequestsForUser(all, role, userId) {
+    if (role === ROLES.ADMIN || BTL_ROLES.indexOf(role) !== -1 || role === ROLES.WAREHOUSE) return all;
+    return all.filter(r => r.requestorUserId === userId);
+  },
+
+  // ---- Auth (stays on Apps Script — PIN handling lives server-side only) ----
   login: (rssUserId, pin) => Api.post('login', { rssUserId, pin }),
   resetPin: (targetUserId, newPin, actorUserId) => Api.post('resetPin', { targetUserId, newPin, actorUserId }),
-
-  // ---- Reads ----
-  ping: () => Api.get('ping'),
-  getLastUpdate: () => Api.get('getLastUpdate'),
-  getBootstrap: (role, userId) => Api.get('getBootstrap', { role, userId }),
-  lookupShop: (shopId) => Api.get('lookupShop', { shopId }),
-  getRequests: (role, userId) => Api.get('getRequests', { role, userId }),
-  getRequestDetail: (requestId) => Api.get('getRequestDetail', { requestId }),
-  getNotifications: (userId) => Api.get('getNotifications', { userId }),
-  getMaterials: () => Api.get('getMaterials'),
-  getActivityLog: (limit) => Api.get('getActivityLog', { limit: limit || '' }),
   getPersonnel: () => Api.get('getPersonnel'),
 
-  // ---- Writes ----
+  // ---- Reads (direct Sheets API) ----
+  ping: () => Promise.resolve({ ok: true, time: new Date().toISOString() }),
+
+  async getLastUpdate() {
+    const config = await SheetsClient.getObjects(SHEET_TABS.CONFIG);
+    const row = config.find(r => r.key === 'LAST_DATA_UPDATE');
+    return { lastUpdate: row ? row.value : null };
+  },
+
+  getMaterials: () => SheetsClient.getObjects(SHEET_TABS.MATERIALS),
+
+  async getRequests(role, userId) {
+    const all = await SheetsClient.getObjects(SHEET_TABS.REQUESTS);
+    return Api._filterRequestsForUser(all, role, userId);
+  },
+
+  async getRequestDetail(requestId) {
+    const data = await SheetsClient.batchGetObjects([
+      SHEET_TABS.REQUESTS, SHEET_TABS.REQUEST_ITEMS, SHEET_TABS.REQUEST_TIMELINE
+    ]);
+    const request = data[SHEET_TABS.REQUESTS].find(r => r.requestId === requestId) || null;
+    const items = data[SHEET_TABS.REQUEST_ITEMS].filter(i => i.requestId === requestId);
+    const timeline = data[SHEET_TABS.REQUEST_TIMELINE].filter(t => t.requestId === requestId);
+    return { request, items, timeline };
+  },
+
+  async getNotifications(userId) {
+    const all = await SheetsClient.getObjects(SHEET_TABS.NOTIFICATIONS);
+    return all.filter(n => n.userId === userId);
+  },
+
+  async getActivityLog(limit) {
+    const all = await SheetsClient.getObjects(SHEET_TABS.ACTIVITY_LOG);
+    return limit ? all.slice(-Number(limit)) : all;
+  },
+
+  lookupShop: (shopId) => SheetsClient.lookupShop(shopId),
+
+  /** One batched call for everything a dashboard needs on first paint — same shape as handleGetBootstrap. */
+  async getBootstrap(role, userId) {
+    const data = await SheetsClient.batchGetObjects([
+      SHEET_TABS.MATERIALS, SHEET_TABS.REQUESTS, SHEET_TABS.NOTIFICATIONS,
+      SHEET_TABS.APPROVAL_WINDOWS, SHEET_TABS.CONFIG
+    ]);
+    const lastUpdateRow = data[SHEET_TABS.CONFIG].find(r => r.key === 'LAST_DATA_UPDATE');
+    return {
+      materials: data[SHEET_TABS.MATERIALS],
+      requests: Api._filterRequestsForUser(data[SHEET_TABS.REQUESTS], role, userId),
+      notifications: data[SHEET_TABS.NOTIFICATIONS].filter(n => n.userId === userId),
+      approvalWindows: data[SHEET_TABS.APPROVAL_WINDOWS],
+      lastUpdate: lastUpdateRow ? lastUpdateRow.value : null
+    };
+  },
+
+  // ---- Writes (stay on Apps Script — LockService-guarded stock math) ----
   submitRequest: (payload) => Api.post('submitRequest', payload),
   reviewRequestItem: (payload) => Api.post('reviewRequestItem', payload),
   finalizeRequestReview: (payload) => Api.post('finalizeRequestReview', payload),
