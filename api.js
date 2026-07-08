@@ -39,6 +39,7 @@ const Api = {
   getNotifications: (userId) => Api.get('getNotifications', { userId }),
   getMaterials: () => Api.get('getMaterials'),
   getActivityLog: (limit) => Api.get('getActivityLog', { limit: limit || '' }),
+  getPersonnel: () => Api.get('getPersonnel'),
 
   // ---- Writes ----
   submitRequest: (payload) => Api.post('submitRequest', payload),
@@ -47,5 +48,6 @@ const Api = {
   releaseRequest: (payload) => Api.post('releaseRequest', payload),
   markNotificationRead: (notificationId) => Api.post('markNotificationRead', { notificationId }),
   createApprovalWindow: (payload) => Api.post('createApprovalWindow', payload),
-  upsertMaterial: (payload) => Api.post('upsertMaterial', payload)
+  upsertMaterial: (payload) => Api.post('upsertMaterial', payload),
+  upsertPersonnel: (payload) => Api.post('upsertPersonnel', payload)
 };
