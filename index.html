@@ -20,15 +20,19 @@
 
     <form id="loginForm" class="login-form">
       <label class="field">
-        <span class="field-label">RSS User ID</span>
-        <input type="text" id="loginUserId" autocomplete="username" required>
+        <span class="field-label">User ID</span>
+        <input type="text" id="loginUserId" placeholder="e.g. 17004327" autocomplete="username" required>
       </label>
       <label class="field">
         <span class="field-label">PIN</span>
-        <input type="password" id="loginPin" inputmode="numeric" autocomplete="current-password" required>
+        <input type="password" id="loginPin" placeholder="Enter PIN" inputmode="numeric" autocomplete="current-password" required>
       </label>
       <button type="submit" class="btn btn-primary btn-block" id="loginBtn">Log In</button>
       <p class="login-error" id="loginError"></p>
+      <div class="login-help">
+        <button type="button" class="link-btn" id="forgotPinBtn">Forgot PIN?</button>
+        <span class="login-hint">First time? Use your User ID as PIN</span>
+      </div>
     </form>
   </div>
   <button class="theme-toggle theme-toggle-login" id="themeToggleLogin" aria-label="Toggle theme">
