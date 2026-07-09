@@ -34,10 +34,13 @@ const Api = {
     return json.data;
   },
 
-  /** Mirrors getRequestsForUser_ in Code.gs: full visibility for Admin/BTL/Warehouse, own-only otherwise. */
+  /** Mirrors getRequestsForUser_ in Code.gs: full visibility for Admin/BTL/Warehouse, own-only otherwise.
+   *  Uses String() coercion because Sheets auto-types numeric-looking IDs (e.g. "17004042") as
+   *  Number, not String — a plain === would silently drop every row for that user. */
   _filterRequestsForUser(all, role, userId) {
     if (role === ROLES.ADMIN || BTL_ROLES.indexOf(role) !== -1 || role === ROLES.WAREHOUSE) return all;
-    return all.filter(r => r.requestorUserId === userId);
+    const target = String(userId).trim();
+    return all.filter(r => String(r.requestorUserId).trim() === target);
   },
 
   // ---- Auth (stays on Apps Script — PIN handling lives server-side only) ----
@@ -65,15 +68,17 @@ const Api = {
     const data = await SheetsClient.batchGetObjects([
       SHEET_TABS.REQUESTS, SHEET_TABS.REQUEST_ITEMS, SHEET_TABS.REQUEST_TIMELINE
     ]);
-    const request = data[SHEET_TABS.REQUESTS].find(r => r.requestId === requestId) || null;
-    const items = data[SHEET_TABS.REQUEST_ITEMS].filter(i => i.requestId === requestId);
-    const timeline = data[SHEET_TABS.REQUEST_TIMELINE].filter(t => t.requestId === requestId);
+    const target = String(requestId).trim();
+    const request = data[SHEET_TABS.REQUESTS].find(r => String(r.requestId).trim() === target) || null;
+    const items = data[SHEET_TABS.REQUEST_ITEMS].filter(i => String(i.requestId).trim() === target);
+    const timeline = data[SHEET_TABS.REQUEST_TIMELINE].filter(t => String(t.requestId).trim() === target);
     return { request, items, timeline };
   },
 
   async getNotifications(userId) {
     const all = await SheetsClient.getObjects(SHEET_TABS.NOTIFICATIONS);
-    return all.filter(n => n.userId === userId);
+    const target = String(userId).trim();
+    return all.filter(n => String(n.userId).trim() === target);
   },
 
   async getActivityLog(limit) {
@@ -90,10 +95,11 @@ const Api = {
       SHEET_TABS.APPROVAL_WINDOWS, SHEET_TABS.CONFIG
     ]);
     const lastUpdateRow = data[SHEET_TABS.CONFIG].find(r => r.key === 'LAST_DATA_UPDATE');
+    const targetUserId = String(userId).trim();
     return {
       materials: data[SHEET_TABS.MATERIALS],
       requests: Api._filterRequestsForUser(data[SHEET_TABS.REQUESTS], role, userId),
-      notifications: data[SHEET_TABS.NOTIFICATIONS].filter(n => n.userId === userId),
+      notifications: data[SHEET_TABS.NOTIFICATIONS].filter(n => String(n.userId).trim() === targetUserId),
       approvalWindows: data[SHEET_TABS.APPROVAL_WINDOWS],
       lastUpdate: lastUpdateRow ? lastUpdateRow.value : null
     };
