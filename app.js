@@ -1004,6 +1004,8 @@ function renderActivityLogTable(logs) {
 // ===================================================================
 
 let USERS_CACHE = [];
+let USERS_PAGE = 1;
+let USERS_PAGE_SIZE = 10;
 
 function viewUsersShell() {
   return `
@@ -1020,6 +1022,7 @@ async function loadUsers() {
   document.getElementById('userAddBtn').addEventListener('click', () => openUserModal(null));
   try {
     USERS_CACHE = await Api.getPersonnel();
+    USERS_PAGE = 1;
     renderUsersTable();
   } catch (err) {
     wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
@@ -1028,10 +1031,18 @@ async function loadUsers() {
 
 function renderUsersTable() {
   const wrap = document.getElementById('usersTableWrap');
-  const rows = USERS_CACHE.map(u => `
+
+  const totalUsers = USERS_CACHE.length;
+  const totalPages = Math.max(1, Math.ceil(totalUsers / USERS_PAGE_SIZE));
+  USERS_PAGE = Math.min(USERS_PAGE, totalPages);
+
+  const start = (USERS_PAGE - 1) * USERS_PAGE_SIZE;
+  const pageItems = USERS_CACHE.slice(start, start + USERS_PAGE_SIZE);
+
+  const rows = pageItems.map(u => `
     <tr>
       <td class="mono">${escapeHtml(u.rssUserId)}</td>
-      <td>${escapeHtml(u.fullName)}</td>
+      <td>${escapeHtml(u.fullName) || '<span class="empty-state">—</span>'}</td>
       <td>${escapeHtml(u.position)}</td>
       <td>${escapeHtml(u.region)}</td>
       <td>${escapeHtml(u.pinStatus || 'Active')}</td>
@@ -1044,12 +1055,42 @@ function renderUsersTable() {
       </td>
     </tr>
   `).join('');
+
+  const rangeLabel = totalUsers === 0 ? '0 of 0'
+    : `${start + 1}–${Math.min(start + USERS_PAGE_SIZE, totalUsers)} of ${totalUsers}`;
+
   wrap.innerHTML = `
+    <div class="table-toolbar">
+      <div class="table-toolbar-left">
+        <span class="field-label">Show</span>
+        <select id="usersPageSize" class="page-size-select">
+          ${[10, 25, 50, 100].map(n => `<option value="${n}" ${n === USERS_PAGE_SIZE ? 'selected' : ''}>${n}</option>`).join('')}
+        </select>
+      </div>
+      <div class="table-toolbar-right">
+        <span class="page-range">${rangeLabel}</span>
+        <button class="btn btn-ghost btn-sm" id="usersPrevBtn" ${USERS_PAGE <= 1 ? 'disabled' : ''}>Prev</button>
+        <span class="page-indicator">Page ${USERS_PAGE} of ${totalPages}</span>
+        <button class="btn btn-ghost btn-sm" id="usersNextBtn" ${USERS_PAGE >= totalPages ? 'disabled' : ''}>Next</button>
+      </div>
+    </div>
     <table class="data-table">
       <thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>Region</th><th>PIN Status</th><th>Last Login</th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="7" class="empty-state">No users found.</td></tr>`}</tbody>
     </table>
   `;
+
+  document.getElementById('usersPageSize').addEventListener('change', (e) => {
+    USERS_PAGE_SIZE = Number(e.target.value);
+    USERS_PAGE = 1;
+    renderUsersTable();
+  });
+  document.getElementById('usersPrevBtn').addEventListener('click', () => {
+    if (USERS_PAGE > 1) { USERS_PAGE -= 1; renderUsersTable(); }
+  });
+  document.getElementById('usersNextBtn').addEventListener('click', () => {
+    if (USERS_PAGE < totalPages) { USERS_PAGE += 1; renderUsersTable(); }
+  });
   document.querySelectorAll('.user-edit-btn').forEach(btn => {
     btn.addEventListener('click', () => openUserModal(USERS_CACHE.find(u => u.rssUserId === btn.dataset.id)));
   });
