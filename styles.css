@@ -171,9 +171,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .btn:active { transform: translateY(1px); }
 .btn-primary {
-  background: linear-gradient(90deg, #4F46E5 0%, #7C6CF0 100%);
-  color: #fff;
-  box-shadow: 0 6px 16px rgba(79,70,229,0.3);
+  background: linear-gradient(90deg, var(--accent-strong) 0%, var(--accent) 100%);
+  color: #06201D;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(63,182,171,0.28);
 }
 .btn-primary:hover { filter: brightness(1.06); }
 .btn-block { width: 100%; margin-top: 8px; }
@@ -187,7 +188,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   margin-top: var(--space-1);
   font-size: 12.5px;
 }
-.link-btn { color: #6D5DF0; font-weight: 600; }
+.link-btn { color: var(--accent-strong); font-weight: 600; }
 .link-btn:hover { text-decoration: underline; }
 .login-hint { color: var(--text-muted); }
 .btn-secondary { background: var(--surface-hover); color: var(--text-primary); border: 1px solid var(--border); }
@@ -392,6 +393,37 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .empty-state { padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
+/* KPI cards (dashboard) — a colored left rail + tinted icon chip ties each
+   number to the same status colors used by the .stamp badges, so the
+   dashboard is scannable by color before you even read the label. */
+.kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-left: 3px solid var(--border-strong);
+}
+.kpi-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+.kpi-icon svg { width: 19px; height: 19px; }
+.kpi-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-value { font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1.1; }
+
+.kpi-total { border-left-color: var(--accent); }
+.kpi-total .kpi-icon { background: var(--accent-dim); color: var(--accent-strong); }
+.kpi-pending { border-left-color: var(--amber); }
+.kpi-pending .kpi-icon { background: var(--amber-dim); color: var(--amber); }
+.kpi-approved { border-left-color: var(--green); }
+.kpi-approved .kpi-icon { background: var(--green-dim); color: var(--green); }
+.kpi-completed { border-left-color: var(--blue); }
+.kpi-completed .kpi-icon { background: var(--blue-dim); color: var(--blue); }
+
 /* Requisition "stamp" badge — the signature element. Uppercase, letter-spaced,
    double-bordered like a rubber stamp, slight rotation on approved/rejected. */
 .stamp {
@@ -412,6 +444,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .stamp-rejected { color: var(--red); background: var(--red-dim); transform: rotate(-2deg); }
 .stamp-clarify { color: var(--blue); background: var(--blue-dim); }
 .stamp-completed { color: var(--accent); background: var(--accent-dim); transform: rotate(-2deg); }
+.stamp-active { color: var(--green); background: var(--green-dim); }
+.stamp-inactive { color: var(--text-muted); background: var(--surface-hover); border-color: var(--border-strong); }
 
 .mono { font-family: var(--font-mono); font-size: 12.5px; }
 
@@ -526,6 +560,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
      the quantity field and remove button don't get squeezed. */
   .item-row { grid-template-columns: 1fr 96px 36px; gap: 6px; }
 
+  table.data-table td[data-label="Action"] { grid-column: 1 / -1; }
+  .action-btns { width: 100%; }
+  .action-btns .item-qty-input { flex: 1 1 70px; }
+  .action-btns .btn { flex: 1 1 auto; }
+
   .login-screen { padding: var(--space-4); }
   .login-card { padding: var(--space-6) var(--space-5); }
   .theme-toggle-login { top: var(--space-4); right: var(--space-4); }
@@ -586,6 +625,29 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   margin-bottom: 8px;
 }
 .item-row select, .item-row input { width: 100%; }
+.item-row select,
+.item-row input[type="number"] {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-hover) 90%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border) 68%);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.item-row select:hover,
+.item-row input[type="number"]:hover {
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface-hover) 85%);
+}
+.item-row select:focus,
+.item-row input[type="number"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.item-row select option { background: var(--bg-elevated); color: var(--text-primary); }
 .item-row-remove {
   width: 36px; height: 36px;
   display: flex; align-items: center; justify-content: center;
@@ -611,7 +673,21 @@ table.data-table td { padding: 10px 8px; border-bottom: 1px solid var(--border);
 table.data-table tbody tr:hover { background: var(--surface-hover); }
 table.data-table tbody tr.clickable { cursor: pointer; }
 
-.action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.action-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.item-qty-input {
+  width: 64px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-hover) 90%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border) 68%);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.item-qty-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 
 .toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; }
 .toolbar-search {
