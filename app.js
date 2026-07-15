@@ -233,16 +233,22 @@ function renderSidebarNav() {
   `).join('');
 
   nav.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentView = btn.dataset.view;
-      nav.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderView(currentView);
-      if (window.innerWidth <= 860) closeMobileMenu();
-    });
+    btn.addEventListener('click', () => goToView(btn.dataset.view));
   });
 
   document.getElementById('logoutBtn').addEventListener('click', logout);
+}
+
+// Central place to switch views: keeps the sidebar's active state and the
+// mobile drawer in sync, so any "jump to another page" link (like the
+// Dashboard's "View all requests") behaves the same as clicking a nav item.
+function goToView(viewId) {
+  currentView = viewId;
+  document.querySelectorAll('#sidebarNav .nav-item').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === viewId);
+  });
+  renderView(viewId);
+  if (window.innerWidth <= 860) closeMobileMenu();
 }
 
 function bindSidebarToggle() {
@@ -407,7 +413,7 @@ function renderView(view) {
   switch (view) {
     case 'dashboard': content.innerHTML = viewDashboard(); bindDashboard(); break;
     case 'materials': content.innerHTML = viewMaterials(); bindMaterials(); break;
-    case 'requests': content.innerHTML = viewRequests(); bindRequestRowClicks(content); break;
+    case 'requests': content.innerHTML = viewRequests(); bindRequests(); break;
     case 'newRequest': content.innerHTML = viewNewRequestForm(); bindNewRequestForm(); break;
     case 'approvalWindows': content.innerHTML = viewApprovalWindows(); bindApprovalWindows(); break;
     case 'activityLog': content.innerHTML = viewActivityLogShell(); loadActivityLog(); break;
@@ -438,14 +444,19 @@ function viewDashboard() {
       ${kpiCard('Completed', completed)}
     </div>
     <div class="card" style="margin-top:20px;">
-      <h3 style="font-size:14px;margin-bottom:12px;">Recent Requests</h3>
-      ${renderRequestRows(STATE.requests.slice(-8).reverse())}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="font-size:14px;">Recent Requests</h3>
+        ${total > 5 ? `<button class="btn btn-ghost btn-sm" id="dashViewAllBtn">View all</button>` : ''}
+      </div>
+      ${renderRequestRows(STATE.requests.slice(-5).reverse())}
     </div>
   `;
 }
 
 function bindDashboard() {
   bindRequestRowClicks(document.getElementById('content'));
+  const viewAllBtn = document.getElementById('dashViewAllBtn');
+  if (viewAllBtn) viewAllBtn.addEventListener('click', () => goToView('requests'));
 }
 
 function kpiCard(label, value) {
@@ -465,8 +476,39 @@ function getValidMaterials() {
   );
 }
 
+let MATERIALS_PAGE = 1;
+let MATERIALS_PAGE_SIZE = 10;
+
 function viewMaterials() {
-  const rows = getValidMaterials().map(m => {
+  return `
+    <div class="page-header">
+      <h1 class="page-title">Materials & Inventory</h1>
+      ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="matAddBtn">+ Add Material</button>` : ''}
+    </div>
+    <div class="card table-wrap" id="materialsTableWrap"></div>
+  `;
+}
+
+function bindMaterials() {
+  const addBtn = document.getElementById('matAddBtn');
+  if (addBtn) addBtn.addEventListener('click', () => openMaterialModal(null));
+  MATERIALS_PAGE = 1;
+  renderMaterialsTable();
+}
+
+function renderMaterialsTable() {
+  const wrap = document.getElementById('materialsTableWrap');
+  if (!wrap) return;
+  const all = getValidMaterials();
+
+  const total = all.length;
+  const totalPages = Math.max(1, Math.ceil(total / MATERIALS_PAGE_SIZE));
+  MATERIALS_PAGE = Math.min(MATERIALS_PAGE, totalPages);
+  const start = (MATERIALS_PAGE - 1) * MATERIALS_PAGE_SIZE;
+  const pageItems = all.slice(start, start + MATERIALS_PAGE_SIZE);
+  const rangeLabel = total === 0 ? '0 of 0' : `${start + 1}–${Math.min(start + MATERIALS_PAGE_SIZE, total)} of ${total}`;
+
+  const rows = pageItems.map(m => {
     const available = (m.availableStock !== undefined && m.availableStock !== '')
       ? m.availableStock
       : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
@@ -484,28 +526,45 @@ function viewMaterials() {
     `;
   }).join('');
 
-  return `
-    <div class="page-header">
-      <h1 class="page-title">Materials & Inventory</h1>
-      ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="matAddBtn">+ Add Material</button>` : ''}
-    </div>
-    <div class="card table-wrap">
-      <table class="data-table">
-        <thead><tr>
-          <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
-        </tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty-state">No materials yet.</td></tr>`}</tbody>
-      </table>
-    </div>
+  wrap.innerHTML = `
+    ${total ? `
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <span class="field-label">Show</span>
+          <select id="materialsPageSize" class="page-size-select">
+            ${[10, 25, 50, 100].map(n => `<option value="${n}" ${n === MATERIALS_PAGE_SIZE ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div class="table-toolbar-right">
+          <span class="page-range">${rangeLabel}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="materialsPrevBtn" aria-label="Previous page" ${MATERIALS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
+          <span class="page-indicator">Page ${MATERIALS_PAGE} of ${totalPages}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="materialsNextBtn" aria-label="Next page" ${MATERIALS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
+        </div>
+      </div>
+    ` : ''}
+    <table class="data-table">
+      <thead><tr>
+        <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>${rows || `<tr><td colspan="8" class="empty-state">No materials yet.</td></tr>`}</tbody>
+    </table>
   `;
-}
 
-function bindMaterials() {
-  if (!isAdmin()) return;
-  const addBtn = document.getElementById('matAddBtn');
-  if (addBtn) addBtn.addEventListener('click', () => openMaterialModal(null));
   document.querySelectorAll('.mat-edit-btn').forEach(btn => {
     btn.addEventListener('click', () => openMaterialModal(findMaterial(btn.dataset.id)));
+  });
+  if (!total) return;
+  document.getElementById('materialsPageSize').addEventListener('change', (e) => {
+    MATERIALS_PAGE_SIZE = Number(e.target.value);
+    MATERIALS_PAGE = 1;
+    renderMaterialsTable();
+  });
+  document.getElementById('materialsPrevBtn').addEventListener('click', () => {
+    if (MATERIALS_PAGE > 1) { MATERIALS_PAGE -= 1; renderMaterialsTable(); }
+  });
+  document.getElementById('materialsNextBtn').addEventListener('click', () => {
+    if (MATERIALS_PAGE < totalPages) { MATERIALS_PAGE += 1; renderMaterialsTable(); }
   });
 }
 
@@ -565,11 +624,66 @@ function openMaterialModal(material) {
 // REQUESTS LIST + DETAIL
 // ===================================================================
 
+let REQUESTS_PAGE = 1;
+let REQUESTS_PAGE_SIZE = 10;
+
 function viewRequests() {
   return `
     <div class="page-header"><h1 class="page-title">Requests</h1></div>
-    <div class="card table-wrap">${renderRequestRows(STATE.requests.slice().reverse())}</div>
+    <div class="card table-wrap" id="requestsTableWrap"></div>
   `;
+}
+
+function bindRequests() {
+  REQUESTS_PAGE = 1;
+  renderRequestsPage();
+}
+
+function renderRequestsPage() {
+  const wrap = document.getElementById('requestsTableWrap');
+  if (!wrap) return;
+  const all = STATE.requests.slice().reverse();
+
+  const total = all.length;
+  const totalPages = Math.max(1, Math.ceil(total / REQUESTS_PAGE_SIZE));
+  REQUESTS_PAGE = Math.min(REQUESTS_PAGE, totalPages);
+  const start = (REQUESTS_PAGE - 1) * REQUESTS_PAGE_SIZE;
+  const pageItems = all.slice(start, start + REQUESTS_PAGE_SIZE);
+  const rangeLabel = total === 0 ? '0 of 0' : `${start + 1}–${Math.min(start + REQUESTS_PAGE_SIZE, total)} of ${total}`;
+
+  wrap.innerHTML = `
+    ${total ? `
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <span class="field-label">Show</span>
+          <select id="requestsPageSize" class="page-size-select">
+            ${[10, 25, 50, 100].map(n => `<option value="${n}" ${n === REQUESTS_PAGE_SIZE ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div class="table-toolbar-right">
+          <span class="page-range">${rangeLabel}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="requestsPrevBtn" aria-label="Previous page" ${REQUESTS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
+          <span class="page-indicator">Page ${REQUESTS_PAGE} of ${totalPages}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="requestsNextBtn" aria-label="Next page" ${REQUESTS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
+        </div>
+      </div>
+    ` : ''}
+    ${renderRequestRows(pageItems)}
+  `;
+
+  bindRequestRowClicks(wrap);
+  if (!total) return;
+  document.getElementById('requestsPageSize').addEventListener('change', (e) => {
+    REQUESTS_PAGE_SIZE = Number(e.target.value);
+    REQUESTS_PAGE = 1;
+    renderRequestsPage();
+  });
+  document.getElementById('requestsPrevBtn').addEventListener('click', () => {
+    if (REQUESTS_PAGE > 1) { REQUESTS_PAGE -= 1; renderRequestsPage(); }
+  });
+  document.getElementById('requestsNextBtn').addEventListener('click', () => {
+    if (REQUESTS_PAGE < totalPages) { REQUESTS_PAGE += 1; renderRequestsPage(); }
+  });
 }
 
 function renderRequestRows(requests) {
