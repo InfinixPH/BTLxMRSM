@@ -39,8 +39,20 @@
   --radius-md: 10px;
   --radius-lg: 16px;
 
+  /* Spacing scale — used in place of ad-hoc pixel values so paddings/gaps
+     stay consistent across the app instead of drifting between similar
+     but not-quite-matching numbers. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
   --sidebar-w: 240px;
   --sidebar-w-collapsed: 68px;
+  --topbar-h: 60px;
 
   --shadow-card: 0 2px 8px rgba(0,0,0,0.24);
   --shadow-pop: 0 8px 24px rgba(0,0,0,0.4);
@@ -168,11 +180,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .login-help {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
   font-size: 12.5px;
 }
 .link-btn { color: #6D5DF0; font-weight: 600; }
@@ -312,6 +324,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   border: none; outline: none; background: transparent;
   color: var(--text-primary); font-size: 13.5px; width: 100%;
 }
+.search-close { display: none; padding: 4px; color: var(--text-muted); flex-shrink: 0; }
+
+.mobile-menu-btn, .mobile-search-btn { display: none; }
 
 .topbar-actions { display: flex; align-items: center; gap: 14px; }
 
@@ -362,9 +377,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .content { flex: 1; padding: 28px; }
 
-.page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 10px; }
-.page-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
-.page-sub { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); flex-wrap: wrap; gap: var(--space-3); }
+.page-header > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.page-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1.2; }
+.page-sub { font-size: 13px; color: var(--text-secondary); }
 
 .card {
   background: var(--surface);
@@ -407,11 +423,106 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
    RESPONSIVE
 =================================================================== */
 
+.sidebar-backdrop { display: none; }
+
 @media (max-width: 860px) {
-  .sidebar { position: fixed; z-index: 30; height: 100vh; }
-  .sidebar:not(.collapsed) { box-shadow: var(--shadow-pop); }
+  /* Sidebar becomes a real off-canvas drawer instead of a fixed icon rail:
+     hidden by default, slides in over content with a dimmed backdrop. */
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    height: 100vh;
+    top: 0; left: 0;
+    width: var(--sidebar-w) !important;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar.mobile-open { transform: translateX(0); box-shadow: var(--shadow-pop); }
+  .sidebar.collapsed .sidebar-mark,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .user-meta,
+  .sidebar.collapsed .logout-icon,
+  .sidebar.collapsed .theme-toggle .nav-label {
+    opacity: 1; width: auto; display: revert;
+  }
+
+  .sidebar-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 29;
+  }
+  .sidebar-backdrop.visible { display: block; }
+
+  .mobile-menu-btn { display: flex; }
+
+  /* Topbar search collapses to an icon; tapping it opens a full-width
+     search overlay pinned to the top of the screen. */
   .topbar-search { display: none; }
-  .content { padding: 18px; }
+  .mobile-search-btn { display: flex; }
+  .topbar-search.search-open {
+    display: flex;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: var(--topbar-h);
+    max-width: none;
+    background: var(--bg-elevated);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0 var(--space-4);
+    z-index: 25;
+  }
+  .topbar-search.search-open .search-close { display: flex; }
+
+  .content { padding: var(--space-4); }
+  .page-header { margin-bottom: var(--space-4); }
+}
+
+@media (max-width: 640px) {
+  /* Data tables become stacked, labeled cards instead of forcing a
+     horizontal scroll — much easier to read one-handed on a phone. */
+  table.data-table thead { display: none; }
+  table.data-table, table.data-table tbody, table.data-table tr, table.data-table td {
+    display: block; width: 100%;
+  }
+  table.data-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+  table.data-table tr:last-child { margin-bottom: 0; }
+  table.data-table td {
+    border-bottom: none;
+    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    text-align: right;
+  }
+  table.data-table td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary);
+    text-align: left;
+    flex-shrink: 0;
+  }
+  table.data-table td:not([data-label]) { justify-content: flex-end; }
+  .action-btns { justify-content: flex-end; }
+
+  /* Material line rows in New Request: drop the rigid 3-column grid so
+     the quantity field and remove button don't get squeezed. */
+  .item-row { grid-template-columns: 1fr 96px 36px; gap: 6px; }
+
+  .login-screen { padding: var(--space-4); }
+  .login-card { padding: var(--space-6) var(--space-5); }
+  .theme-toggle-login { top: var(--space-4); right: var(--space-4); }
+  .login-help { flex-direction: column; align-items: flex-start; }
 }
 
 /* Reduced motion */
