@@ -17,6 +17,7 @@ let STATE = {              // in-memory app data, hydrated from cache then netwo
 let currentView = 'dashboard';
 let pollTimer = null;
 let itemRowSeq = 0;
+let GLOBAL_SEARCH = '';
 
 const REQUEST_TYPES = ['Regular Replenishment', 'New Store Setup', 'Damage Replacement', 'Special Request'];
 
@@ -52,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindSidebarToggle();
   bindMobileMenu();
   bindMobileSearch();
+  bindTopbarSearch();
   bindNotifPanel();
   bindModal();
 
@@ -247,8 +249,38 @@ function goToView(viewId) {
   document.querySelectorAll('#sidebarNav .nav-item').forEach(b => {
     b.classList.toggle('active', b.dataset.view === viewId);
   });
+  clearGlobalSearch();
   renderView(viewId);
   if (window.innerWidth <= 860) closeMobileMenu();
+}
+
+function clearGlobalSearch() {
+  GLOBAL_SEARCH = '';
+  const input = document.getElementById('globalSearch');
+  if (!input) return;
+  input.value = '';
+  const placeholders = {
+    requests: 'Search request ID, store, type, status...',
+    materials: 'Search material ID, name, category...'
+  };
+  input.placeholder = placeholders[currentView] || 'Search requests, shop ID, materials...';
+}
+
+function bindTopbarSearch() {
+  const input = document.getElementById('globalSearch');
+  input.addEventListener('input', () => {
+    GLOBAL_SEARCH = input.value.trim().toLowerCase();
+    if (currentView === 'requests') { REQUESTS_PAGE = 1; renderRequestsPage(); }
+    else if (currentView === 'materials') { MATERIALS_PAGE = 1; renderMaterialsTable(); }
+  });
+  document.getElementById('searchCloseBtn').addEventListener('click', () => {
+    if (GLOBAL_SEARCH) { clearGlobalSearch(); renderView(currentView); }
+  });
+}
+
+function matchesSearch(...fields) {
+  if (!GLOBAL_SEARCH) return true;
+  return fields.some(f => String(f || '').toLowerCase().includes(GLOBAL_SEARCH));
 }
 
 function bindSidebarToggle() {
@@ -437,11 +469,11 @@ function viewDashboard() {
     <div class="page-header">
       <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Welcome back, ${escapeHtml(SESSION.fullName || SESSION.userId)}</p></div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;">
-      ${kpiCard('Total Requests', total)}
-      ${kpiCard('Pending', pending)}
-      ${kpiCard('Approved', approved)}
-      ${kpiCard('Completed', completed)}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
+      ${kpiCard('Total Requests', total, 'total', 'list')}
+      ${kpiCard('Pending', pending, 'pending', 'clock')}
+      ${kpiCard('Approved', approved, 'approved', 'grid')}
+      ${kpiCard('Completed', completed, 'completed', 'box')}
     </div>
     <div class="card" style="margin-top:20px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -459,8 +491,16 @@ function bindDashboard() {
   if (viewAllBtn) viewAllBtn.addEventListener('click', () => goToView('requests'));
 }
 
-function kpiCard(label, value) {
-  return `<div class="card"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">${label}</div><div style="font-family:var(--font-display);font-size:26px;font-weight:700;">${value}</div></div>`;
+function kpiCard(label, value, type, icon) {
+  return `
+    <div class="card kpi-card kpi-${type}">
+      <div class="kpi-icon"><svg>${ICONS[icon] || ICONS.grid}</svg></div>
+      <div class="kpi-body">
+        <div class="kpi-label">${escapeHtml(label)}</div>
+        <div class="kpi-value">${escapeHtml(value)}</div>
+      </div>
+    </div>
+  `;
 }
 
 // ===================================================================
@@ -499,7 +539,9 @@ function bindMaterials() {
 function renderMaterialsTable() {
   const wrap = document.getElementById('materialsTableWrap');
   if (!wrap) return;
-  const all = getValidMaterials();
+  const all = getValidMaterials().filter(m =>
+    matchesSearch(m.materialId, m.materialName, m.category, m.status)
+  );
 
   const total = all.length;
   const totalPages = Math.max(1, Math.ceil(total / MATERIALS_PAGE_SIZE));
@@ -520,7 +562,7 @@ function renderMaterialsTable() {
         <td data-label="Current">${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
         <td data-label="Reserved">${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
         <td data-label="Available">${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
-        <td data-label="Status">${escapeHtml(m.status || 'Active')}</td>
+        <td data-label="Status"><span class="stamp ${(m.status || 'Active') === 'Active' ? 'stamp-active' : 'stamp-inactive'}">${escapeHtml(m.status || 'Active')}</span></td>
         ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}"><svg>${ICONS.edit}</svg> Edit</button></td>` : ''}
       </tr>
     `;
@@ -547,7 +589,7 @@ function renderMaterialsTable() {
       <thead><tr>
         <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="8" class="empty-state">No materials yet.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="8" class="empty-state">${GLOBAL_SEARCH ? 'No materials match your search.' : 'No materials yet.'}</td></tr>`}</tbody>
     </table>
   `;
 
@@ -642,7 +684,9 @@ function bindRequests() {
 function renderRequestsPage() {
   const wrap = document.getElementById('requestsTableWrap');
   if (!wrap) return;
-  const all = STATE.requests.slice().reverse();
+  const all = STATE.requests.slice().reverse().filter(r =>
+    matchesSearch(r.requestId, r.storeName, r.requestType, r.overallStatus)
+  );
 
   const total = all.length;
   const totalPages = Math.max(1, Math.ceil(total / REQUESTS_PAGE_SIZE));
@@ -687,7 +731,7 @@ function renderRequestsPage() {
 }
 
 function renderRequestRows(requests) {
-  if (!requests.length) return `<p class="empty-state">No requests yet.</p>`;
+  if (!requests.length) return `<p class="empty-state">${GLOBAL_SEARCH ? 'No requests match your search.' : 'No requests yet.'}</p>`;
   return `
     <table class="data-table">
       <thead><tr>
@@ -738,15 +782,15 @@ function renderRequestDetailModal(detail) {
     const canAct = canReviewRequests() && item.itemStatus === 'Pending' && request.currentStage === 'BTL Review';
     return `
       <tr data-item-id="${escapeHtml(item.itemId)}">
-        <td>${escapeHtml(name)}</td>
-        <td>${escapeHtml(item.qtyRequested)}</td>
-        <td>${item.qtyApproved !== '' && item.qtyApproved !== undefined ? escapeHtml(item.qtyApproved) : '—'}</td>
-        <td>${stampFor(item.itemStatus)}</td>
-        <td>${escapeHtml(item.btlRemarks || '—')}</td>
-        <td>
+        <td data-label="Material">${escapeHtml(name)}</td>
+        <td data-label="Qty Req.">${escapeHtml(item.qtyRequested)}</td>
+        <td data-label="Qty Appr.">${item.qtyApproved !== '' && item.qtyApproved !== undefined ? escapeHtml(item.qtyApproved) : '—'}</td>
+        <td data-label="Status">${stampFor(item.itemStatus)}</td>
+        <td data-label="Remarks">${escapeHtml(item.btlRemarks || '—')}</td>
+        <td data-label="Action">
           ${canAct ? `
             <div class="action-btns">
-              <input type="number" class="item-qty-input" placeholder="Qty" value="${escapeHtml(item.qtyRequested)}" style="width:64px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elevated);color:var(--text-primary);">
+              <input type="number" class="item-qty-input" placeholder="Qty" value="${escapeHtml(item.qtyRequested)}">
               <button class="btn btn-primary btn-sm item-approve-btn">Approve</button>
               <button class="btn btn-danger btn-sm item-reject-btn">Reject</button>
               <button class="btn btn-secondary btn-sm item-clarify-btn">Clarify</button>
