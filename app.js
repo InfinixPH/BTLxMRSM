@@ -23,17 +23,22 @@ const REQUEST_TYPES = ['Regular Replenishment', 'New Store Setup', 'Damage Repla
 // ===================================================================
 // ICONS (inline, keeps this dependency-free)
 // ===================================================================
+// Icon set sourced from svgrepo.com (Feather Icons collection — CC0/MIT,
+// 24x24 viewBox, stroke-based), kept in one place so every icon in the
+// app shares the same visual family and weight.
 const ICONS = {
-  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
-  box: '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
-  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
-  users: '<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.33 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.33 1.7 1.7 0 00-1 1.55V21a2 2 0 01-4 0v-.09A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.87.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.55-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.33-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.55V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9a1.7 1.7 0 001.55 1H21a2 2 0 010 4h-.09a1.7 1.7 0 00-1.55 1z"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  trash: '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z"/>',
-  edit: '<path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>'
+  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
+  box: '<path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>',
+  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  users: '<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+  edit: '<path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
+  chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>'
 };
 
 // ===================================================================
@@ -45,8 +50,14 @@ document.addEventListener('DOMContentLoaded', () => {
   bindThemeToggles();
   bindLoginForm();
   bindSidebarToggle();
+  bindMobileMenu();
+  bindMobileSearch();
   bindNotifPanel();
   bindModal();
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 860) closeMobileMenu();
+  });
 
   const stored = localStorage.getItem(CONFIG.STORAGE_KEYS.SESSION);
   if (stored) {
@@ -227,6 +238,7 @@ function renderSidebarNav() {
       nav.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       renderView(currentView);
+      if (window.innerWidth <= 860) closeMobileMenu();
     });
   });
 
@@ -235,8 +247,41 @@ function renderSidebarNav() {
 
 function bindSidebarToggle() {
   document.getElementById('sidebarToggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
+    // On mobile the sidebar is an off-canvas drawer, so this button closes it.
+    // On desktop it collapses the sidebar down to an icon rail instead.
+    if (window.innerWidth <= 860) {
+      closeMobileMenu();
+    } else {
+      document.getElementById('sidebar').classList.toggle('collapsed');
+    }
   });
+}
+
+function bindMobileMenu() {
+  const btn = document.getElementById('mobileMenuBtn');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    document.getElementById('sidebar').classList.add('mobile-open');
+    document.getElementById('sidebarBackdrop').classList.add('visible');
+  });
+  document.getElementById('sidebarBackdrop').addEventListener('click', closeMobileMenu);
+}
+
+function closeMobileMenu() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebarBackdrop').classList.remove('visible');
+}
+
+function bindMobileSearch() {
+  const openBtn = document.getElementById('mobileSearchBtn');
+  const closeBtn = document.getElementById('searchCloseBtn');
+  const searchBar = document.getElementById('topbarSearch');
+  if (!openBtn) return;
+  openBtn.addEventListener('click', () => {
+    searchBar.classList.add('search-open');
+    document.getElementById('globalSearch').focus();
+  });
+  closeBtn.addEventListener('click', () => searchBar.classList.remove('search-open'));
 }
 
 // ===================================================================
@@ -427,14 +472,14 @@ function viewMaterials() {
       : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
     return `
       <tr>
-        <td class="mono">${escapeHtml(m.materialId)}</td>
-        <td>${escapeHtml(m.materialName)}</td>
-        <td>${escapeHtml(m.category)}</td>
-        <td>${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
-        <td>${escapeHtml(m.status || 'Active')}</td>
-        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}">Edit</button></td>` : ''}
+        <td class="mono" data-label="ID">${escapeHtml(m.materialId)}</td>
+        <td data-label="Name">${escapeHtml(m.materialName)}</td>
+        <td data-label="Category">${escapeHtml(m.category)}</td>
+        <td data-label="Current">${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
+        <td data-label="Reserved">${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
+        <td data-label="Available">${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
+        <td data-label="Status">${escapeHtml(m.status || 'Active')}</td>
+        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}"><svg>${ICONS.edit}</svg> Edit</button></td>` : ''}
       </tr>
     `;
   }).join('');
@@ -537,11 +582,11 @@ function renderRequestRows(requests) {
       <tbody>
         ${requests.map(r => `
           <tr class="clickable" data-request-id="${escapeHtml(r.requestId)}">
-            <td class="mono">${escapeHtml(r.requestId)}</td>
-            <td>${escapeHtml(r.storeName)}</td>
-            <td>${escapeHtml(r.requestType)}</td>
-            <td>${stampFor(r.overallStatus)}</td>
-            <td>${formatDate(r.timestamp)}</td>
+            <td class="mono" data-label="Request ID">${escapeHtml(r.requestId)}</td>
+            <td data-label="Store">${escapeHtml(r.storeName)}</td>
+            <td data-label="Type">${escapeHtml(r.requestType)}</td>
+            <td data-label="Status">${stampFor(r.overallStatus)}</td>
+            <td data-label="Submitted">${formatDate(r.timestamp)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -982,13 +1027,13 @@ function renderActivityLogTable(logs) {
   if (!wrap) return;
   const rows = logs.map(l => `
     <tr>
-      <td>${formatDate(l.timestamp)}</td>
-      <td class="mono">${escapeHtml(l.userId)}</td>
-      <td>${escapeHtml(l.role)}</td>
-      <td>${escapeHtml(l.action)}</td>
-      <td>${escapeHtml(l.targetType)}</td>
-      <td class="mono">${escapeHtml(l.targetId)}</td>
-      <td>${escapeHtml(l.details)}</td>
+      <td data-label="Time">${formatDate(l.timestamp)}</td>
+      <td class="mono" data-label="User">${escapeHtml(l.userId)}</td>
+      <td data-label="Role">${escapeHtml(l.role)}</td>
+      <td data-label="Action">${escapeHtml(l.action)}</td>
+      <td data-label="Target Type">${escapeHtml(l.targetType)}</td>
+      <td class="mono" data-label="Target ID">${escapeHtml(l.targetId)}</td>
+      <td data-label="Details">${escapeHtml(l.details)}</td>
     </tr>
   `).join('');
   wrap.innerHTML = `
@@ -1041,15 +1086,15 @@ function renderUsersTable() {
 
   const rows = pageItems.map(u => `
     <tr>
-      <td class="mono">${escapeHtml(u.rssUserId)}</td>
-      <td>${escapeHtml(u.fullName) || '<span class="empty-state">—</span>'}</td>
-      <td>${escapeHtml(u.position)}</td>
-      <td>${escapeHtml(u.region)}</td>
-      <td>${escapeHtml(u.pinStatus || 'Active')}</td>
-      <td>${formatDate(u.lastLogin)}</td>
+      <td class="mono" data-label="User ID">${escapeHtml(u.rssUserId)}</td>
+      <td data-label="Name">${escapeHtml(u.fullName) || '<span class="empty-state">—</span>'}</td>
+      <td data-label="Role">${escapeHtml(u.position)}</td>
+      <td data-label="Region">${escapeHtml(u.region)}</td>
+      <td data-label="PIN Status">${escapeHtml(u.pinStatus || 'Active')}</td>
+      <td data-label="Last Login">${formatDate(u.lastLogin)}</td>
       <td>
         <div class="action-btns">
-          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}">Edit</button>
+          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}"><svg>${ICONS.edit}</svg> Edit</button>
           <button class="btn btn-secondary btn-sm user-reset-btn" data-id="${escapeHtml(u.rssUserId)}">Reset PIN</button>
         </div>
       </td>
@@ -1069,9 +1114,9 @@ function renderUsersTable() {
       </div>
       <div class="table-toolbar-right">
         <span class="page-range">${rangeLabel}</span>
-        <button class="btn btn-ghost btn-sm" id="usersPrevBtn" ${USERS_PAGE <= 1 ? 'disabled' : ''}>Prev</button>
+        <button class="btn btn-ghost btn-sm icon-btn" id="usersPrevBtn" aria-label="Previous page" ${USERS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
         <span class="page-indicator">Page ${USERS_PAGE} of ${totalPages}</span>
-        <button class="btn btn-ghost btn-sm" id="usersNextBtn" ${USERS_PAGE >= totalPages ? 'disabled' : ''}>Next</button>
+        <button class="btn btn-ghost btn-sm icon-btn" id="usersNextBtn" aria-label="Next page" ${USERS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
       </div>
     </div>
     <table class="data-table">
