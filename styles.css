@@ -480,13 +480,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 
 @media (max-width: 640px) {
-  /* Data tables become stacked, labeled cards instead of forcing a
-     horizontal scroll — much easier to read one-handed on a phone. */
+  /* Data tables become compact, labeled cards instead of forcing a
+     horizontal scroll. Fields pair up two-per-row (rather than one full
+     row each) so a 7-column table collapses to ~4 short rows, not 7 tall
+     ones — the point is to keep long lists actually scannable on a phone. */
+  table.data-table { border-collapse: separate; }
   table.data-table thead { display: none; }
-  table.data-table, table.data-table tbody, table.data-table tr, table.data-table td {
-    display: block; width: 100%;
-  }
+  table.data-table, table.data-table tbody { display: block; width: 100%; }
   table.data-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: var(--space-3);
@@ -494,26 +498,29 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   }
   table.data-table tr:last-child { margin-bottom: 0; }
   table.data-table td {
-    border-bottom: none;
-    padding: 6px 0;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    text-align: right;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: none;
+    padding: 0;
+    text-align: left;
+  }
+  /* The first column acts as the card's title (Request ID, Material ID,
+     User ID, timestamp...) so it spans the full width above the rest. */
+  table.data-table td:first-child,
+  table.data-table td:not([data-label]) {
+    grid-column: 1 / -1;
   }
   table.data-table td[data-label]::before {
     content: attr(data-label);
     font-weight: 600;
-    font-size: 11px;
+    font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: var(--text-secondary);
-    text-align: left;
-    flex-shrink: 0;
+    color: var(--text-muted);
   }
-  table.data-table td:not([data-label]) { justify-content: flex-end; }
-  .action-btns { justify-content: flex-end; }
+  table.data-table td:first-child[data-label]::before { font-size: 11px; }
+  .action-btns { justify-content: flex-start; flex-wrap: wrap; }
 
   /* Material line rows in New Request: drop the rigid 3-column grid so
      the quantity field and remove button don't get squeezed. */
