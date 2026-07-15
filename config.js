@@ -61,7 +61,8 @@ const NAV_BY_ROLE = {
     { id: 'settings', label: 'Settings', icon: 'settings' }
   ],
   REQUESTOR: [
-    { id: 'dashboard', label: 'My Requests', icon: 'grid' },
+    { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+    { id: 'requests', label: 'My Requests', icon: 'list' },
     { id: 'materials', label: 'Materials Catalog', icon: 'box' },
     { id: 'newRequest', label: 'New Request', icon: 'plus' },
     { id: 'settings', label: 'Settings', icon: 'settings' }
