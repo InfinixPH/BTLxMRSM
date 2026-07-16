@@ -82,8 +82,8 @@ const Api = {
   },
 
   async getActivityLog(limit) {
-    const all = await SheetsClient.getObjects(SHEET_TABS.ACTIVITY_LOG);
-    return limit ? all.slice(-Number(limit)) : all;
+    if (limit) return SheetsClient.getObjectsTail(SHEET_TABS.ACTIVITY_LOG, Number(limit));
+    return SheetsClient.getObjects(SHEET_TABS.ACTIVITY_LOG);
   },
 
   lookupShop: (shopId) => SheetsClient.lookupShop(shopId),
