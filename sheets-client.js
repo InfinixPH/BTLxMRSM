@@ -84,6 +84,44 @@ const SheetsClient = {
   },
 
   /**
+   * Fetches only the last `limit` data rows of a tab instead of the whole sheet —
+   * used for ACTIVITY LOG, which only grows and would otherwise re-download its
+   * entire history (every row, every column) on every page open. Costs one extra
+   * lightweight metadata call to find the sheet's current row count, then a single
+   * range-limited values.get for just the rows we actually need.
+   */
+  async getObjectsTail(tabName, limit) {
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}` +
+      `?fields=sheets.properties(title,gridProperties.rowCount)&key=${CONFIG.SHEETS_API_KEY}`;
+    const metaRes = await fetch(metaUrl, { cache: 'no-store' });
+    const metaJson = await metaRes.json();
+    if (!metaRes.ok) throw new Error((metaJson.error && metaJson.error.message) || 'Sheets API request failed.');
+
+    const sheetMeta = (metaJson.sheets || []).find(s => s.properties.title === tabName);
+    const totalRows = sheetMeta ? sheetMeta.properties.gridProperties.rowCount : null;
+    // Fall back to a full fetch if metadata lookup fails for any reason — better slow than broken.
+    if (!totalRows) return this.getObjects(tabName);
+
+    const startRow = Math.max(2, totalRows - limit + 1); // row 1 is the header
+    const range = `${tabName}!A${startRow}:Z${totalRows}`;
+    const headerRange = `${tabName}!A1:Z1`;
+    const query = [headerRange, range].map(r => `ranges=${encodeURIComponent(r)}`).join('&');
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SPREADSHEET_ID}/values:batchGet?${query}&key=${CONFIG.SHEETS_API_KEY}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    const json = await res.json();
+    if (!res.ok) throw new Error((json.error && json.error.message) || 'Sheets API request failed.');
+
+    const [headerRows, dataRows] = json.valueRanges || [];
+    const values = [...(headerRows?.values || []), ...(dataRows?.values || [])];
+    const objects = this._valuesToObjects(values);
+    // _valuesToObjects assumes data rows are contiguous right after the header (row 2, 3, 4...),
+    // which isn't true here since we skipped straight to `startRow` — patch _row to the real
+    // sheet row so anything downstream that relies on it (e.g. future edit-by-row features) is correct.
+    objects.forEach((obj, i) => { obj._row = startRow + i; });
+    return objects;
+  },
+
+  /**
    * Fast path for lookupShop: fetches STORE DETAILS by raw position (not header
    * name), matching Code.gs's handleLookupShop_ exactly. Columns: A Region,
    * B City, C Responsible RSS, D RSS User ID, E Mall Name/Location,
