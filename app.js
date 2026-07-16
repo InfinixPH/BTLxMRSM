@@ -1291,20 +1291,118 @@ function bindNewRequestForm() {
 
 function addNewRequestItemRow(container) {
   const rowId = `nrItem${itemRowSeq++}`;
-  const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
   const row = document.createElement('div');
   row.className = 'item-row';
   row.id = rowId;
   row.innerHTML = `
-    <select class="nr-item-material">
-      <option value="">— Select material —</option>
-      ${activeMaterials.map(m => `<option value="${escapeHtml(m.materialId)}">${escapeHtml(m.materialName)} (${escapeHtml(m.unit)})</option>`).join('')}
-    </select>
+    <div class="material-combo">
+      <input type="text" class="nr-item-material-search" placeholder="Search material or category…" autocomplete="off">
+      <input type="hidden" class="nr-item-material-value">
+      <div class="material-combo-panel hidden"></div>
+    </div>
     <input type="number" class="nr-item-qty" placeholder="Qty" min="1">
     <button type="button" class="item-row-remove" aria-label="Remove"><svg viewBox="0 0 24 24">TRASHICON</svg></button>
   `.replace('TRASHICON', ICONS.trash);
   row.querySelector('.item-row-remove').addEventListener('click', () => row.remove());
+  bindMaterialCombo(row);
   container.appendChild(row);
+}
+
+/** Renders the filtered material list inside a combo panel, grouped by category. */
+function renderMaterialComboOptions(panel, materials, activeIndex) {
+  const groups = {};
+  materials.forEach(m => {
+    const cat = (m.category && String(m.category).trim()) || 'Uncategorized';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(m);
+  });
+  const catNames = Object.keys(groups).sort();
+  let flatIndex = 0;
+  panel.innerHTML = catNames.map(cat => `
+    <div class="material-combo-group-label">${escapeHtml(cat)}</div>
+    ${groups[cat].map(m => {
+      const idx = flatIndex++;
+      return `<div class="material-combo-option${idx === activeIndex ? ' active' : ''}" data-id="${escapeHtml(m.materialId)}" data-index="${idx}">
+        ${escapeHtml(m.materialName)} <span class="material-combo-unit">(${escapeHtml(m.unit)})</span>
+      </div>`;
+    }).join('')}
+  `).join('') || `<div class="material-combo-empty">No materials found.</div>`;
+}
+
+/** Wires up one item row's search input + dropdown panel: typeahead filtering across
+ *  name/category/ID, category grouping, keyboard nav, and click-to-select. */
+function bindMaterialCombo(row) {
+  const searchInput = row.querySelector('.nr-item-material-search');
+  const hiddenInput = row.querySelector('.nr-item-material-value');
+  const panel = row.querySelector('.material-combo-panel');
+  let activeIndex = -1;
+
+  function getFilteredMaterials(query) {
+    const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
+    const q = query.trim().toLowerCase();
+    if (!q) return activeMaterials;
+    return activeMaterials.filter(m =>
+      String(m.materialName).toLowerCase().includes(q) ||
+      String(m.category || '').toLowerCase().includes(q) ||
+      String(m.materialId).toLowerCase().includes(q)
+    );
+  }
+
+  function openPanel() {
+    activeIndex = -1;
+    renderMaterialComboOptions(panel, getFilteredMaterials(searchInput.value), activeIndex);
+    panel.classList.remove('hidden');
+  }
+  function closePanel() { panel.classList.add('hidden'); }
+
+  function updateActive(options) {
+    options.forEach((opt, i) => opt.classList.toggle('active', i === activeIndex));
+    if (options[activeIndex]) options[activeIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectOption(optionEl) {
+    const materialId = optionEl.dataset.id;
+    const material = getValidMaterials().find(m => m.materialId === materialId);
+    hiddenInput.value = materialId;
+    searchInput.value = material ? `${material.materialName} (${material.unit})` : materialId;
+    closePanel();
+  }
+
+  searchInput.addEventListener('focus', openPanel);
+  searchInput.addEventListener('input', () => {
+    hiddenInput.value = ''; // typing invalidates whatever was previously selected
+    openPanel();
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    const options = Array.from(panel.querySelectorAll('.material-combo-option'));
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!options.length) return;
+      activeIndex = Math.min(activeIndex + 1, options.length - 1);
+      updateActive(options);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!options.length) return;
+      activeIndex = Math.max(activeIndex - 1, 0);
+      updateActive(options);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && options[activeIndex]) selectOption(options[activeIndex]);
+      else if (options.length === 1) selectOption(options[0]);
+    } else if (e.key === 'Escape') {
+      closePanel();
+    }
+  });
+  panel.addEventListener('mousedown', (e) => {
+    const opt = e.target.closest('.material-combo-option');
+    if (opt) { e.preventDefault(); selectOption(opt); } // preventDefault stops input blur from beating the click
+  });
+  searchInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      closePanel();
+      if (!hiddenInput.value) searchInput.value = ''; // no valid pick — don't leave stray text behind
+    }, 120);
+  });
 }
 
 async function submitNewRequest() {
@@ -1327,7 +1425,7 @@ async function submitNewRequest() {
 
   const items = [];
   document.querySelectorAll('#nrItemsContainer .item-row').forEach(row => {
-    const materialId = row.querySelector('.nr-item-material').value;
+    const materialId = row.querySelector('.nr-item-material-value').value;
     const qty = Number(row.querySelector('.nr-item-qty').value || 0);
     if (materialId && qty > 0) items.push({ materialId, qty });
   });
