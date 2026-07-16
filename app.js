@@ -1641,9 +1641,20 @@ function addNewRequestItemRow(container) {
   const row = document.createElement('div');
   row.className = 'item-row';
   row.id = rowId;
+  const categories = Array.from(new Set(
+    getValidMaterials()
+      .filter(m => (m.status || 'Active') === 'Active')
+      .map(m => (m.category && String(m.category).trim()) || 'Uncategorized')
+  )).sort();
   row.innerHTML = `
     <div class="material-combo">
-      <input type="text" class="nr-item-material-search" placeholder="Search material or category…" autocomplete="off">
+      <div class="material-combo-fields">
+        <select class="nr-item-category-filter" title="Filter by category">
+          <option value="">All categories</option>
+          ${categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+        </select>
+        <input type="text" class="nr-item-material-search" placeholder="Search material…" autocomplete="off">
+      </div>
       <input type="hidden" class="nr-item-material-value">
       <div class="material-combo-panel hidden"></div>
     </div>
@@ -1655,7 +1666,9 @@ function addNewRequestItemRow(container) {
   container.appendChild(row);
 }
 
-/** Renders the filtered material list inside a combo panel, grouped by category. */
+/** Renders the filtered material list inside a combo panel, grouped by category.
+ *  Materials sharing an identical name within the same category get their ID
+ *  appended so requestors can tell duplicate-named catalog entries apart. */
 function renderMaterialComboOptions(panel, materials, activeIndex) {
   const groups = {};
   materials.forEach(m => {
@@ -1665,20 +1678,26 @@ function renderMaterialComboOptions(panel, materials, activeIndex) {
   });
   const catNames = Object.keys(groups).sort();
   let flatIndex = 0;
-  panel.innerHTML = catNames.map(cat => `
+  panel.innerHTML = catNames.map(cat => {
+    const nameCounts = {};
+    groups[cat].forEach(m => { nameCounts[m.materialName] = (nameCounts[m.materialName] || 0) + 1; });
+    return `
     <div class="material-combo-group-label">${escapeHtml(cat)}</div>
     ${groups[cat].map(m => {
       const idx = flatIndex++;
+      const isDuplicateName = nameCounts[m.materialName] > 1;
       return `<div class="material-combo-option${idx === activeIndex ? ' active' : ''}" data-id="${escapeHtml(m.materialId)}" data-index="${idx}">
-        ${escapeHtml(m.materialName)} <span class="material-combo-unit">(${escapeHtml(m.unit)})</span>
+        ${escapeHtml(m.materialName)} <span class="material-combo-unit">(${escapeHtml(m.unit)})</span>${isDuplicateName ? ` <span class="material-combo-id">#${escapeHtml(m.materialId)}</span>` : ''}
       </div>`;
     }).join('')}
-  `).join('') || `<div class="material-combo-empty">No materials found.</div>`;
+  `;
+  }).join('') || `<div class="material-combo-empty">No materials found.</div>`;
 }
 
-/** Wires up one item row's search input + dropdown panel: typeahead filtering across
- *  name/category/ID, category grouping, keyboard nav, and click-to-select. */
+/** Wires up one item row's category filter + search input + dropdown panel: typeahead
+ *  filtering across name/category/ID, category grouping, keyboard nav, and click-to-select. */
 function bindMaterialCombo(row) {
+  const categoryFilter = row.querySelector('.nr-item-category-filter');
   const searchInput = row.querySelector('.nr-item-material-search');
   const hiddenInput = row.querySelector('.nr-item-material-value');
   const panel = row.querySelector('.material-combo-panel');
@@ -1686,9 +1705,13 @@ function bindMaterialCombo(row) {
 
   function getFilteredMaterials(query) {
     const activeMaterials = getValidMaterials().filter(m => (m.status || 'Active') === 'Active');
+    const category = categoryFilter.value;
+    const byCategory = category
+      ? activeMaterials.filter(m => ((m.category && String(m.category).trim()) || 'Uncategorized') === category)
+      : activeMaterials;
     const q = query.trim().toLowerCase();
-    if (!q) return activeMaterials;
-    return activeMaterials.filter(m =>
+    if (!q) return byCategory;
+    return byCategory.filter(m =>
       String(m.materialName).toLowerCase().includes(q) ||
       String(m.category || '').toLowerCase().includes(q) ||
       String(m.materialId).toLowerCase().includes(q)
@@ -1715,6 +1738,12 @@ function bindMaterialCombo(row) {
     closePanel();
   }
 
+  categoryFilter.addEventListener('change', () => {
+    hiddenInput.value = ''; // switching category invalidates whatever was previously selected
+    searchInput.value = '';
+    searchInput.focus();
+    openPanel();
+  });
   searchInput.addEventListener('focus', openPanel);
   searchInput.addEventListener('input', () => {
     hiddenInput.value = ''; // typing invalidates whatever was previously selected
