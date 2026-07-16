@@ -1267,11 +1267,11 @@ function printTransmittal(request, items) {
   <div class="tf-header">
     <div><span class="label">TO:</span> ${escapeHtml(request.storeName)}</div>
     <div><span class="label">DATED:</span> <span class="tf-red">${dateStr}</span></div>
-    <div><span class="label">ADDRESS:</span> ${escapeHtml(request.region || '')}</div>
+    <div><span class="label">ADDRESS:</span></div>
     <div><span class="label">CATEGORY:</span> <span class="tf-red">${escapeHtml(request.requestType || '')}</span></div>
     <div><span class="label">CONTACT PERSON:</span> ${escapeHtml(request.rssName || '')}</div>
     <div><span class="label">DISPATCH NO.:</span> ${escapeHtml(request.requestId)}</div>
-    <div><span class="label">CONTACT NO.:</span> ${escapeHtml(request.contactNumber || '')}</div>
+    <div><span class="label">CONTACT NO.:</span></div>
   </div>
   <table class="tf-table">
     <thead>
