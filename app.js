@@ -39,8 +39,17 @@ const ICONS = {
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   edit: '<path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>',
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
-  chevronRight: '<polyline points="9 18 15 12 9 6"/>'
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  alertTriangle: '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>',
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
 };
+
+// Small helper so freshly-added icons always carry the viewBox their 24x24
+// paths were drawn against — used for anything new below.
+function svgIcon(name, cls) {
+  return `<svg viewBox="0 0 24 24"${cls ? ` class="${cls}"` : ''}>${ICONS[name] || ICONS.grid}</svg>`;
+}
 
 // ===================================================================
 // INIT
@@ -229,7 +238,7 @@ function renderSidebarNav() {
   const items = getNavGroupForRole(SESSION.role);
   nav.innerHTML = items.map(item => `
     <button class="nav-item ${item.id === currentView ? 'active' : ''}" data-view="${item.id}">
-      <svg>${ICONS[item.icon] || ICONS.grid}</svg>
+      <svg viewBox="0 0 24 24">${ICONS[item.icon] || ICONS.grid}</svg>
       <span class="nav-label">${item.label}</span>
     </button>
   `).join('');
@@ -244,12 +253,13 @@ function renderSidebarNav() {
 // Central place to switch views: keeps the sidebar's active state and the
 // mobile drawer in sync, so any "jump to another page" link (like the
 // Dashboard's "View all requests") behaves the same as clicking a nav item.
-function goToView(viewId) {
+function goToView(viewId, opts = {}) {
   currentView = viewId;
   document.querySelectorAll('#sidebarNav .nav-item').forEach(b => {
     b.classList.toggle('active', b.dataset.view === viewId);
   });
   clearGlobalSearch();
+  PENDING_REQUESTS_FILTER = (viewId === 'requests' && opts.statusFilter) ? opts.statusFilter : null;
   renderView(viewId);
   if (window.innerWidth <= 860) closeMobileMenu();
 }
@@ -465,15 +475,26 @@ function viewDashboard() {
   const approved = STATE.requests.filter(r => r.overallStatus === 'Approved').length;
   const completed = STATE.requests.filter(r => r.overallStatus === 'Completed').length;
 
+  const lowStock = getValidMaterials().filter(m => {
+    const available = (m.availableStock !== undefined && m.availableStock !== '')
+      ? Number(m.availableStock)
+      : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
+    return (m.status || 'Active') === 'Active' && available <= Number(m.reorderLevel || 0);
+  });
+
   return `
     <div class="page-header">
-      <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Welcome back, ${escapeHtml(SESSION.fullName || SESSION.userId)}</p></div>
+      <div>
+        <span class="page-kicker">Overview</span>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-sub">Welcome back, ${escapeHtml(SESSION.fullName || SESSION.userId)}</p>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
-      ${kpiCard('Total Requests', total, 'total', 'list')}
-      ${kpiCard('Pending', pending, 'pending', 'clock')}
-      ${kpiCard('Approved', approved, 'approved', 'grid')}
-      ${kpiCard('Completed', completed, 'completed', 'box')}
+      ${kpiCard('Total Requests', total, 'total', 'list', 'All')}
+      ${kpiCard('Pending', pending, 'pending', 'clock', 'Pending')}
+      ${kpiCard('Approved', approved, 'approved', 'grid', 'Approved')}
+      ${kpiCard('Completed', completed, 'completed', 'box', 'Completed')}
     </div>
     <div class="card" style="margin-top:20px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -482,6 +503,29 @@ function viewDashboard() {
       </div>
       ${renderRequestRows(STATE.requests.slice(-5).reverse())}
     </div>
+    ${lowStock.length ? `
+      <div class="card low-stock-card" style="margin-top:20px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:14px;display:flex;align-items:center;gap:8px;">
+            <span class="low-stock-icon">${svgIcon('alertTriangle')}</span> Low Stock
+          </h3>
+          <button class="btn btn-ghost btn-sm" id="dashLowStockBtn">View materials</button>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>Name</th><th>Available</th><th>Reorder Level</th></tr></thead>
+          <tbody>
+            ${lowStock.slice(0, 5).map(m => `
+              <tr>
+                <td class="mono" data-label="ID">${escapeHtml(m.materialId)}</td>
+                <td data-label="Name">${escapeHtml(m.materialName)}</td>
+                <td data-label="Available"><span class="low-stock-value">${escapeHtml(m.availableStock ?? (Number(m.currentStock || 0) - Number(m.reservedStock || 0)))} ${escapeHtml(m.unit || '')}</span></td>
+                <td data-label="Reorder Level">${escapeHtml(m.reorderLevel ?? 0)} ${escapeHtml(m.unit || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
   `;
 }
 
@@ -489,12 +533,22 @@ function bindDashboard() {
   bindRequestRowClicks(document.getElementById('content'));
   const viewAllBtn = document.getElementById('dashViewAllBtn');
   if (viewAllBtn) viewAllBtn.addEventListener('click', () => goToView('requests'));
+  const lowStockBtn = document.getElementById('dashLowStockBtn');
+  if (lowStockBtn) lowStockBtn.addEventListener('click', () => goToView('materials'));
+  document.querySelectorAll('.kpi-clickable').forEach(card => {
+    const go = () => {
+      const status = card.dataset.filterStatus;
+      goToView('requests', { statusFilter: status && status !== 'All' ? status : null });
+    };
+    card.addEventListener('click', go);
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
 }
 
-function kpiCard(label, value, type, icon) {
+function kpiCard(label, value, type, icon, filterStatus) {
   return `
-    <div class="card kpi-card kpi-${type}">
-      <div class="kpi-icon"><svg>${ICONS[icon] || ICONS.grid}</svg></div>
+    <div class="card kpi-card kpi-${type}${filterStatus ? ' kpi-clickable' : ''}" ${filterStatus ? `data-filter-status="${escapeHtml(filterStatus)}" role="button" tabindex="0"` : ''}>
+      <div class="kpi-icon">${svgIcon(icon)}</div>
       <div class="kpi-body">
         <div class="kpi-label">${escapeHtml(label)}</div>
         <div class="kpi-value">${escapeHtml(value)}</div>
@@ -522,7 +576,7 @@ let MATERIALS_PAGE_SIZE = 10;
 function viewMaterials() {
   return `
     <div class="page-header">
-      <h1 class="page-title">Materials & Inventory</h1>
+      <div><span class="page-kicker">Inventory</span><h1 class="page-title">Materials &amp; Inventory</h1></div>
       ${isAdmin() ? `<button class="btn btn-primary btn-sm" id="matAddBtn">+ Add Material</button>` : ''}
     </div>
     <div class="card table-wrap" id="materialsTableWrap"></div>
@@ -563,7 +617,7 @@ function renderMaterialsTable() {
         <td data-label="Reserved">${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
         <td data-label="Available">${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
         <td data-label="Status"><span class="stamp ${(m.status || 'Active') === 'Active' ? 'stamp-active' : 'stamp-inactive'}">${escapeHtml(m.status || 'Active')}</span></td>
-        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}"><svg>${ICONS.edit}</svg> Edit</button></td>` : ''}
+        ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}">${svgIcon('edit')} Edit</button></td>` : ''}
       </tr>
     `;
   }).join('');
@@ -579,9 +633,9 @@ function renderMaterialsTable() {
         </div>
         <div class="table-toolbar-right">
           <span class="page-range">${rangeLabel}</span>
-          <button class="btn btn-ghost btn-sm icon-btn" id="materialsPrevBtn" aria-label="Previous page" ${MATERIALS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
+          <button class="btn btn-ghost btn-sm icon-btn" id="materialsPrevBtn" aria-label="Previous page" ${MATERIALS_PAGE <= 1 ? 'disabled' : ''}>${svgIcon('chevronLeft')}</button>
           <span class="page-indicator">Page ${MATERIALS_PAGE} of ${totalPages}</span>
-          <button class="btn btn-ghost btn-sm icon-btn" id="materialsNextBtn" aria-label="Next page" ${MATERIALS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
+          <button class="btn btn-ghost btn-sm icon-btn" id="materialsNextBtn" aria-label="Next page" ${MATERIALS_PAGE >= totalPages ? 'disabled' : ''}>${svgIcon('chevronRight')}</button>
         </div>
       </div>
     ` : ''}
@@ -589,7 +643,7 @@ function renderMaterialsTable() {
       <thead><tr>
         <th>ID</th><th>Name</th><th>Category</th><th>Current</th><th>Reserved</th><th>Available</th><th>Status</th>${isAdmin() ? '<th></th>' : ''}
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="8" class="empty-state">${GLOBAL_SEARCH ? 'No materials match your search.' : 'No materials yet.'}</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="8" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>${GLOBAL_SEARCH ? 'No materials match your search.' : 'No materials yet.'}</td></tr>`}</tbody>
     </table>
   `;
 
@@ -668,10 +722,13 @@ function openMaterialModal(material) {
 
 let REQUESTS_PAGE = 1;
 let REQUESTS_PAGE_SIZE = 10;
+let PENDING_REQUESTS_FILTER = null;
 
 function viewRequests() {
   return `
-    <div class="page-header"><h1 class="page-title">Requests</h1></div>
+    <div class="page-header">
+      <div><span class="page-kicker">Track &amp; Review</span><h1 class="page-title">Requests</h1></div>
+    </div>
     <div class="card table-wrap" id="requestsTableWrap"></div>
   `;
 }
@@ -684,9 +741,9 @@ function bindRequests() {
 function renderRequestsPage() {
   const wrap = document.getElementById('requestsTableWrap');
   if (!wrap) return;
-  const all = STATE.requests.slice().reverse().filter(r =>
-    matchesSearch(r.requestId, r.storeName, r.requestType, r.overallStatus)
-  );
+  const all = STATE.requests.slice().reverse()
+    .filter(r => !PENDING_REQUESTS_FILTER || r.overallStatus === PENDING_REQUESTS_FILTER)
+    .filter(r => matchesSearch(r.requestId, r.storeName, r.requestType, r.overallStatus));
 
   const total = all.length;
   const totalPages = Math.max(1, Math.ceil(total / REQUESTS_PAGE_SIZE));
@@ -696,6 +753,14 @@ function renderRequestsPage() {
   const rangeLabel = total === 0 ? '0 of 0' : `${start + 1}–${Math.min(start + REQUESTS_PAGE_SIZE, total)} of ${total}`;
 
   wrap.innerHTML = `
+    ${PENDING_REQUESTS_FILTER ? `
+      <div class="filter-chip-row">
+        <span class="filter-chip">
+          Status: ${escapeHtml(PENDING_REQUESTS_FILTER)}
+          <button type="button" id="clearStatusFilterBtn" aria-label="Clear filter">${svgIcon('close')}</button>
+        </span>
+      </div>
+    ` : ''}
     ${total ? `
       <div class="table-toolbar">
         <div class="table-toolbar-left">
@@ -706,9 +771,9 @@ function renderRequestsPage() {
         </div>
         <div class="table-toolbar-right">
           <span class="page-range">${rangeLabel}</span>
-          <button class="btn btn-ghost btn-sm icon-btn" id="requestsPrevBtn" aria-label="Previous page" ${REQUESTS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
+          <button class="btn btn-ghost btn-sm icon-btn" id="requestsPrevBtn" aria-label="Previous page" ${REQUESTS_PAGE <= 1 ? 'disabled' : ''}>${svgIcon('chevronLeft')}</button>
           <span class="page-indicator">Page ${REQUESTS_PAGE} of ${totalPages}</span>
-          <button class="btn btn-ghost btn-sm icon-btn" id="requestsNextBtn" aria-label="Next page" ${REQUESTS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
+          <button class="btn btn-ghost btn-sm icon-btn" id="requestsNextBtn" aria-label="Next page" ${REQUESTS_PAGE >= totalPages ? 'disabled' : ''}>${svgIcon('chevronRight')}</button>
         </div>
       </div>
     ` : ''}
@@ -716,6 +781,12 @@ function renderRequestsPage() {
   `;
 
   bindRequestRowClicks(wrap);
+  const clearBtn = document.getElementById('clearStatusFilterBtn');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    PENDING_REQUESTS_FILTER = null;
+    REQUESTS_PAGE = 1;
+    renderRequestsPage();
+  });
   if (!total) return;
   document.getElementById('requestsPageSize').addEventListener('change', (e) => {
     REQUESTS_PAGE_SIZE = Number(e.target.value);
@@ -731,7 +802,10 @@ function renderRequestsPage() {
 }
 
 function renderRequestRows(requests) {
-  if (!requests.length) return `<p class="empty-state">${GLOBAL_SEARCH ? 'No requests match your search.' : 'No requests yet.'}</p>`;
+  if (!requests.length) {
+    const msg = GLOBAL_SEARCH || PENDING_REQUESTS_FILTER ? 'No requests match your filters.' : 'No requests yet.';
+    return `<div class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>${msg}</div>`;
+  }
   return `
     <table class="data-table">
       <thead><tr>
@@ -930,7 +1004,7 @@ function bindRequestDetailActions(requestId) {
 function viewNewRequestForm() {
   const openWindows = (STATE.approvalWindows || []).filter(w => w.status === 'Open');
   return `
-    <div class="page-header"><h1 class="page-title">New Request</h1></div>
+    <div class="page-header"><div><span class="page-kicker">Submit</span><h1 class="page-title">New Request</h1></div></div>
     <div class="card">
       <div class="section-title">Shop Details</div>
       <div class="form-grid">
@@ -1088,17 +1162,17 @@ async function submitNewRequest() {
 function viewApprovalWindows() {
   const rows = (STATE.approvalWindows || []).slice().reverse().map(w => `
     <tr>
-      <td class="mono">${escapeHtml(w.windowId)}</td>
-      <td>${escapeHtml(w.windowName)}</td>
-      <td>${formatDate(w.startDate)}</td>
-      <td>${formatDate(w.endDate)}</td>
-      <td>${escapeHtml(w.status)}</td>
-      <td>${escapeHtml(w.createdBy)}</td>
+      <td class="mono" data-label="ID">${escapeHtml(w.windowId)}</td>
+      <td data-label="Name">${escapeHtml(w.windowName)}</td>
+      <td data-label="Start">${formatDate(w.startDate)}</td>
+      <td data-label="End">${formatDate(w.endDate)}</td>
+      <td data-label="Status"><span class="stamp ${w.status === 'Open' ? 'stamp-approved' : 'stamp-inactive'}">${escapeHtml(w.status || '—')}</span></td>
+      <td data-label="Created By">${escapeHtml(w.createdBy)}</td>
     </tr>
   `).join('');
 
   return `
-    <div class="page-header"><h1 class="page-title">Approval Windows</h1></div>
+    <div class="page-header"><div><span class="page-kicker">Scheduling</span><h1 class="page-title">Approval Windows</h1></div></div>
     ${isAdmin() ? `
     <div class="card" style="margin-bottom:20px;">
       <div class="section-title">Create New Window</div>
@@ -1113,7 +1187,7 @@ function viewApprovalWindows() {
     <div class="card table-wrap">
       <table class="data-table">
         <thead><tr><th>ID</th><th>Name</th><th>Start</th><th>End</th><th>Status</th><th>Created By</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state">No approval windows yet.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>No approval windows yet.</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -1150,7 +1224,7 @@ function bindApprovalWindows() {
 
 function viewActivityLogShell() {
   return `
-    <div class="page-header"><h1 class="page-title">Activity Logs</h1></div>
+    <div class="page-header"><div><span class="page-kicker">Audit Trail</span><h1 class="page-title">Activity Logs</h1></div></div>
     <div class="toolbar">
       <div class="toolbar-search">
         <input id="logSearch" placeholder="Filter by user, action, or target...">
@@ -1197,7 +1271,7 @@ function renderActivityLogTable(logs) {
   wrap.innerHTML = `
     <table class="data-table">
       <thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Target Type</th><th>Target ID</th><th>Details</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No activity found.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="7" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>No activity found.</td></tr>`}</tbody>
     </table>
   `;
 }
@@ -1213,7 +1287,7 @@ let USERS_PAGE_SIZE = 10;
 function viewUsersShell() {
   return `
     <div class="page-header">
-      <h1 class="page-title">User Management</h1>
+      <div><span class="page-kicker">Team</span><h1 class="page-title">User Management</h1></div>
       <button class="btn btn-primary btn-sm" id="userAddBtn">+ Add User</button>
     </div>
     <div class="card table-wrap" id="usersTableWrap"><p class="empty-state">Loading...</p></div>
@@ -1248,11 +1322,11 @@ function renderUsersTable() {
       <td data-label="Name">${escapeHtml(u.fullName) || '<span class="empty-state">—</span>'}</td>
       <td data-label="Role">${escapeHtml(u.position)}</td>
       <td data-label="Region">${escapeHtml(u.region)}</td>
-      <td data-label="PIN Status">${escapeHtml(u.pinStatus || 'Active')}</td>
+      <td data-label="PIN Status"><span class="stamp ${(u.pinStatus || 'Active') === 'Active' ? 'stamp-active' : 'stamp-pending'}">${escapeHtml(u.pinStatus || 'Active')}</span></td>
       <td data-label="Last Login">${formatDate(u.lastLogin)}</td>
       <td>
         <div class="action-btns">
-          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}"><svg>${ICONS.edit}</svg> Edit</button>
+          <button class="btn btn-ghost btn-sm user-edit-btn" data-id="${escapeHtml(u.rssUserId)}">${svgIcon('edit')} Edit</button>
           <button class="btn btn-secondary btn-sm user-reset-btn" data-id="${escapeHtml(u.rssUserId)}">Reset PIN</button>
         </div>
       </td>
@@ -1272,14 +1346,14 @@ function renderUsersTable() {
       </div>
       <div class="table-toolbar-right">
         <span class="page-range">${rangeLabel}</span>
-        <button class="btn btn-ghost btn-sm icon-btn" id="usersPrevBtn" aria-label="Previous page" ${USERS_PAGE <= 1 ? 'disabled' : ''}><svg>${ICONS.chevronLeft}</svg></button>
+        <button class="btn btn-ghost btn-sm icon-btn" id="usersPrevBtn" aria-label="Previous page" ${USERS_PAGE <= 1 ? 'disabled' : ''}>${svgIcon('chevronLeft')}</button>
         <span class="page-indicator">Page ${USERS_PAGE} of ${totalPages}</span>
-        <button class="btn btn-ghost btn-sm icon-btn" id="usersNextBtn" aria-label="Next page" ${USERS_PAGE >= totalPages ? 'disabled' : ''}><svg>${ICONS.chevronRight}</svg></button>
+        <button class="btn btn-ghost btn-sm icon-btn" id="usersNextBtn" aria-label="Next page" ${USERS_PAGE >= totalPages ? 'disabled' : ''}>${svgIcon('chevronRight')}</button>
       </div>
     </div>
     <table class="data-table">
       <thead><tr><th>User ID</th><th>Name</th><th>Role</th><th>Region</th><th>PIN Status</th><th>Last Login</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty-state">No users found.</td></tr>`}</tbody>
+      <tbody>${rows || `<tr><td colspan="7" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>No users found.</td></tr>`}</tbody>
     </table>
   `;
 
@@ -1381,7 +1455,7 @@ function openResetPinModal(targetUserId) {
 
 function viewSettings() {
   return `
-    <div class="page-header"><h1 class="page-title">Settings</h1></div>
+    <div class="page-header"><div><span class="page-kicker">Preferences</span><h1 class="page-title">Settings</h1></div></div>
     <div class="card" style="margin-bottom:20px;">
       <div class="section-title">Profile</div>
       <div class="form-grid">
