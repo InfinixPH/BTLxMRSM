@@ -1097,7 +1097,7 @@ function renderRequestDetailModal(detail) {
   const allReviewed = items.every(i => i.itemStatus !== 'Pending');
   const showFinalize = canReviewRequests() && request.currentStage === 'BTL Review' && allReviewed && items.length > 0;
   const showRelease = canReleaseRequests() && request.overallStatus === 'Approved';
-  const showTransmittal = canReviewRequests() || canReleaseRequests();
+  const showTransmittal = (canReviewRequests() || canReleaseRequests()) && request.overallStatus === 'Approved';
 
   document.getElementById('modalBody').innerHTML = `
     <div class="form-grid">
@@ -1216,10 +1216,12 @@ function bindRequestDetailActions(requestId, request, items) {
   }
 }
 
-/** Builds and opens a print-ready Transmittal Form for a request, matching the
- *  layout BTL already uses in the Google Sheets version (header block, then a
- *  Materials/Quantity/Remarks table, notes, and a sign-off section) so the
- *  printed page can go straight into the delivery box. */
+/** Builds and opens a print-ready Transmittal Form for a request. Address and
+ *  contact number are intentionally left blank (filled in by hand on print) —
+ *  we don't have a reliable per-shop address, and pre-filling a contact number
+ *  was showing the same value on every printout. Layout is an original,
+ *  cleaner design (Poppins, soft cards, teal accent) rather than a copy of the
+ *  spreadsheet template — same information, presented better. */
 function printTransmittal(request, items) {
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1231,69 +1233,184 @@ function printTransmittal(request, items) {
   const rows = items.map(item => {
     const material = findMaterial(item.materialId);
     const name = material ? material.materialName : item.materialId;
+    const unit = material ? material.unit : '';
     const qty = item.qtyApproved !== '' && item.qtyApproved !== undefined ? item.qtyApproved : item.qtyRequested;
-    return `<tr><td class="tf-material">${escapeHtml(name)}</td><td class="tf-qty">${escapeHtml(qty)}</td><td></td></tr>`;
+    return `<tr><td class="tf-material">${escapeHtml(name)}${unit ? `<span class="tf-unit">${escapeHtml(unit)}</span>` : ''}</td><td class="tf-qty">${escapeHtml(qty)}</td><td class="tf-remarks"></td></tr>`;
   }).join('');
-  // Pad with a handful of blank rows so the printed table has room for
-  // manually-added items, matching the blank ruled rows in the sheet version.
-  const blankRows = Array.from({ length: 8 }, () => `<tr><td></td><td></td><td></td></tr>`).join('');
+  // Pad with a few blank ruled rows so items added by hand at delivery have room.
+  const blankRows = Array.from({ length: 4 }, () => `<tr class="tf-blank"><td>&nbsp;</td><td></td><td></td></tr>`).join('');
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Transmittal Form — ${escapeHtml(request.requestId)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 32px 40px; }
-  h1 { text-align: center; font-size: 26px; letter-spacing: 0.02em; margin-bottom: 14px; }
-  .tf-rule { border: none; border-top: 2px solid #111; margin-bottom: 16px; }
-  .tf-header { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 13.5px; margin-bottom: 18px; }
-  .tf-header .label { font-weight: 700; }
-  .tf-red { color: #c0281c; font-weight: 700; }
-  table.tf-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
-  table.tf-table th, table.tf-table td { border: 1px solid #999; padding: 6px 8px; font-size: 13px; }
-  table.tf-table thead .tf-band-total th { background: #c0281c; color: #fff; text-align: center; }
-  table.tf-table thead .tf-band-alloc th { background: #17324a; color: #fff; text-align: center; }
-  table.tf-table thead .tf-band-labels th { background: #cfcfcf; }
-  .tf-qty { text-align: center; font-weight: 700; }
-  .tf-material { }
-  .tf-notes { font-size: 12.5px; margin-bottom: 20px; }
-  .tf-notes div { margin-bottom: 4px; }
-  .tf-sign { font-size: 13.5px; }
-  .tf-sign div { margin-bottom: 22px; border-bottom: 1px solid #111; width: 340px; padding-bottom: 2px; }
-  @media print { body { padding: 12px 24px; } }
+  body {
+    font-family: 'Poppins', Arial, sans-serif;
+    color: #1C2528;
+    padding: 40px 48px;
+    max-width: 820px;
+    margin: 0 auto;
+  }
+  .tf-top {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .tf-mark { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; color: #17847A; text-transform: uppercase; }
+  .tf-title { font-size: 24px; font-weight: 700; margin-top: 2px; letter-spacing: 0.01em; }
+  .tf-dispatch {
+    text-align: right; font-size: 12px; color: #6B7A7C;
+  }
+  .tf-dispatch .tf-dispatch-id {
+    font-size: 15px; font-weight: 700; color: #1C2528; font-family: 'Poppins', monospace;
+  }
+  .tf-divider { border: none; border-top: 2px solid #17847A; margin-bottom: 26px; }
+
+  .tf-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px 28px;
+    margin-bottom: 28px;
+    padding: 18px 20px;
+    background: #F4F6F5;
+    border-radius: 12px;
+  }
+  .tf-info-item { min-width: 0; }
+  .tf-info-label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #8B9695; margin-bottom: 3px;
+  }
+  .tf-info-value { font-size: 14px; font-weight: 500; color: #1C2528; }
+  .tf-info-value.tf-blank-line { border-bottom: 1px solid #C3CDCA; min-height: 18px; }
+  .tf-info-value.tf-accent { color: #17847A; font-weight: 600; }
+
+  .tf-section-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #6B7A7C; margin-bottom: 10px;
+  }
+
+  table.tf-table {
+    width: 100%; border-collapse: collapse; margin-bottom: 26px;
+    border: 1px solid #DCE3E1; border-radius: 12px; overflow: hidden;
+  }
+  table.tf-table thead th {
+    background: #17847A; color: #fff;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 11px 14px; text-align: left;
+  }
+  table.tf-table thead th.tf-qty-head { text-align: center; width: 110px; }
+  table.tf-table thead th.tf-remarks-head { width: 160px; }
+  table.tf-table td { padding: 10px 14px; font-size: 13.5px; border-top: 1px solid #EDF1F0; }
+  table.tf-table tbody tr:nth-child(even):not(.tf-blank) { background: #FAFBFB; }
+  .tf-material { font-weight: 500; }
+  .tf-unit { color: #8B9695; font-size: 11.5px; margin-left: 6px; }
+  .tf-qty { text-align: center; font-weight: 700; color: #17847A; }
+  .tf-remarks { color: #8B9695; }
+  .tf-blank td { height: 26px; }
+  .tf-total-row td { border-top: 2px solid #17847A; font-weight: 700; }
+  .tf-total-row .tf-qty { font-size: 15px; }
+
+  .tf-notes {
+    font-size: 12px; color: #556063; margin-bottom: 30px;
+    padding: 14px 18px; background: #F4F6F5; border-radius: 10px;
+  }
+  .tf-notes-title { font-weight: 600; color: #1C2528; margin-bottom: 6px; font-size: 12.5px; }
+  .tf-notes ul { margin: 0; padding-left: 18px; }
+  .tf-notes li { margin-bottom: 3px; }
+
+  .tf-sign-row { display: flex; gap: 40px; margin-top: 10px; }
+  .tf-sign-col { flex: 1; }
+  .tf-sign-line { border-bottom: 1px solid #1C2528; height: 40px; }
+  .tf-sign-caption { font-size: 11px; color: #8B9695; margin-top: 6px; letter-spacing: 0.02em; }
+
+  .tf-print-btn {
+    display: inline-block; margin-bottom: 20px; padding: 10px 18px;
+    background: #17847A; color: #fff; border: none; border-radius: 8px;
+    font-family: 'Poppins', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  @media print {
+    body { padding: 16px 28px; }
+    .tf-print-btn { display: none; }
+  }
 </style>
 </head><body>
-  <h1>TRANSMITTAL FORM</h1>
-  <hr class="tf-rule">
-  <div class="tf-header">
-    <div><span class="label">TO:</span> ${escapeHtml(request.storeName)}</div>
-    <div><span class="label">DATED:</span> <span class="tf-red">${dateStr}</span></div>
-    <div><span class="label">ADDRESS:</span></div>
-    <div><span class="label">CATEGORY:</span> <span class="tf-red">${escapeHtml(request.requestType || '')}</span></div>
-    <div><span class="label">CONTACT PERSON:</span> ${escapeHtml(request.rssName || '')}</div>
-    <div><span class="label">DISPATCH NO.:</span> ${escapeHtml(request.requestId)}</div>
-    <div><span class="label">CONTACT NO.:</span></div>
+  <button class="tf-print-btn" onclick="window.print()">Print</button>
+  <div class="tf-top">
+    <div>
+      <div class="tf-mark">Material Request Transmittal</div>
+      <div class="tf-title">Transmittal Form</div>
+    </div>
+    <div class="tf-dispatch">
+      Dispatch No.
+      <div class="tf-dispatch-id">${escapeHtml(request.requestId)}</div>
+    </div>
   </div>
+  <hr class="tf-divider">
+
+  <div class="tf-info">
+    <div class="tf-info-item">
+      <div class="tf-info-label">To</div>
+      <div class="tf-info-value">${escapeHtml(request.storeName)}</div>
+    </div>
+    <div class="tf-info-item">
+      <div class="tf-info-label">Address</div>
+      <div class="tf-info-value tf-blank-line">&nbsp;</div>
+    </div>
+    <div class="tf-info-item">
+      <div class="tf-info-label">Dated</div>
+      <div class="tf-info-value tf-accent">${dateStr}</div>
+    </div>
+    <div class="tf-info-item">
+      <div class="tf-info-label">Contact Person</div>
+      <div class="tf-info-value">${escapeHtml(request.rssName || '')}</div>
+    </div>
+    <div class="tf-info-item">
+      <div class="tf-info-label">Contact No.</div>
+      <div class="tf-info-value tf-blank-line">&nbsp;</div>
+    </div>
+    <div class="tf-info-item">
+      <div class="tf-info-label">Category</div>
+      <div class="tf-info-value tf-accent">${escapeHtml(request.requestType || '')}</div>
+    </div>
+  </div>
+
+  <div class="tf-section-label">Materials for Delivery</div>
   <table class="tf-table">
     <thead>
-      <tr class="tf-band-total"><th colspan="3">RECEIVING</th></tr>
-      <tr class="tf-band-alloc"><th colspan="3">ALLOCATION</th></tr>
-      <tr class="tf-band-labels"><th>MATERIALS</th><th>QUANTITY (${total})</th><th>REMARKS</th></tr>
+      <tr><th>Material</th><th class="tf-qty-head">Quantity</th><th class="tf-remarks-head">Remarks</th></tr>
     </thead>
-    <tbody>${rows}${blankRows}</tbody>
+    <tbody>
+      ${rows}
+      ${blankRows}
+      <tr class="tf-total-row"><td>Total</td><td class="tf-qty">${total}</td><td></td></tr>
+    </tbody>
   </table>
+
   <div class="tf-notes">
-    <strong>NOTES:</strong>
-    <div>✓ All items inspected at time of receipt</div>
-    <div>✓ Sign the Waybill and Transmittal Form</div>
-    <div>✓ If there are missing or damaged items, report to the BTL Team within 24 hours (Late reports will not be accepted)</div>
-    <div>✓ Upload this Transmittal to DCR for Receiving Records.</div>
+    <div class="tf-notes-title">Notes</div>
+    <ul>
+      <li>All items inspected at time of receipt.</li>
+      <li>Sign the Waybill and Transmittal Form.</li>
+      <li>If there are missing or damaged items, report to the BTL Team within 24 hours (late reports will not be accepted).</li>
+      <li>Upload this Transmittal to DCR for Receiving Records.</li>
+    </ul>
   </div>
-  <div class="tf-sign">
-    <div><strong>PREPARED BY:</strong></div>
-    <div><strong>NAME &amp; SIGNATURE:</strong></div>
-    <div><strong>DATE:</strong></div>
+
+  <div class="tf-sign-row">
+    <div class="tf-sign-col">
+      <div class="tf-sign-line"></div>
+      <div class="tf-sign-caption">PREPARED BY — NAME &amp; SIGNATURE</div>
+    </div>
+    <div class="tf-sign-col">
+      <div class="tf-sign-line"></div>
+      <div class="tf-sign-caption">RECEIVED BY — NAME &amp; SIGNATURE</div>
+    </div>
+    <div class="tf-sign-col">
+      <div class="tf-sign-line"></div>
+      <div class="tf-sign-caption">DATE</div>
+    </div>
   </div>
-<script>window.onload = function() { window.print(); };</script>
 </body></html>`;
 
   const win = window.open('', '_blank');
