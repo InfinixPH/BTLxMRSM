@@ -156,6 +156,12 @@ function enterApp() {
     renderUserBadge();
     renderSidebarNav();
 
+    // First-time / admin-reset PIN still equals the User ID until changed — block usage until it isn't.
+    if (SESSION.pinStatus && SESSION.pinStatus !== 'Active') {
+      promptForcedPinChange();
+      return;
+    }
+
     const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
@@ -187,6 +193,46 @@ async function refreshBootstrap(cacheKey) {
     console.error('Bootstrap refresh failed:', err);
     setSyncStatus('offline');
   }
+}
+
+/** Mandatory PIN change shown right after login when pinStatus isn't 'Active' yet
+ *  (fresh account, or an Admin reset the PIN back to the User ID). Can't be dismissed
+ *  until a valid new PIN is set — see FORCE_PIN_CHANGE in the modal helpers above. */
+function promptForcedPinChange() {
+  FORCE_PIN_CHANGE = true;
+  openModal('Set a new PIN', `
+    <p class="form-note">Your PIN is still your User ID. For security, set a new PIN before continuing.</p>
+    <div class="field"><span class="field-label">New PIN</span><input id="fpNewPin" type="password" inputmode="numeric"></div>
+    <div class="field"><span class="field-label">Confirm New PIN</span><input id="fpConfirmPin" type="password" inputmode="numeric"></div>
+    <p class="login-error" id="fpError"></p>
+    <div class="form-actions"><button class="btn btn-primary" id="fpSaveBtn">Set PIN & Continue</button></div>
+  `);
+
+  document.getElementById('fpSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('fpError');
+    const newPin = document.getElementById('fpNewPin').value.trim();
+    const confirmPin = document.getElementById('fpConfirmPin').value.trim();
+    errorEl.textContent = '';
+
+    const validationError = isValidNewPin(newPin, SESSION.userId);
+    if (validationError) { errorEl.textContent = validationError; return; }
+    if (newPin !== confirmPin) { errorEl.textContent = 'New PIN and confirmation do not match.'; return; }
+
+    const btn = document.getElementById('fpSaveBtn');
+    btn.disabled = true;
+    try {
+      await Api.resetPin(SESSION.userId, newPin, SESSION.userId);
+      SESSION.pinStatus = 'Active';
+      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION, JSON.stringify(SESSION));
+      FORCE_PIN_CHANGE = false;
+      closeModal();
+      toast('PIN set. Welcome!', 'success');
+      enterApp(); // re-run now that pinStatus is Active — proceeds into the normal flow
+    } catch (err) {
+      errorEl.textContent = err.message;
+      btn.disabled = false;
+    }
+  });
 }
 
 async function checkForUpdates(cacheKey) {
@@ -345,6 +391,28 @@ function bindNotifPanel() {
   document.addEventListener('click', (e) => {
     if (!panel.contains(e.target) && !btn.contains(e.target)) panel.classList.add('hidden');
   });
+
+  document.getElementById('notifMarkAllBtn').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const unreadIds = (STATE.notifications || []).filter(n => n.readStatus === 'Unread').map(n => n.notificationId);
+    if (!unreadIds.length) return;
+    const markAllBtn = document.getElementById('notifMarkAllBtn');
+    markAllBtn.disabled = true;
+    try {
+      // Sequential, not Promise.all — avoids hammering the Apps Script Web App
+      // with a burst of simultaneous writes for someone with many unread items.
+      for (const id of unreadIds) {
+        await Api.markNotificationRead(id);
+        const n = STATE.notifications.find(x => x.notificationId === id);
+        if (n) n.readStatus = 'Read';
+      }
+      renderNotifications();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      markAllBtn.disabled = false;
+    }
+  });
 }
 
 function renderNotifications() {
@@ -353,6 +421,7 @@ function renderNotifications() {
   const badge = document.getElementById('notifBadge');
   badge.textContent = unread.length;
   badge.classList.toggle('hidden', unread.length === 0);
+  document.getElementById('notifMarkAllBtn').classList.toggle('hidden', unread.length === 0);
 
   const container = document.getElementById('notifList');
   if (!list.length) {
@@ -399,10 +468,12 @@ function toast(message, type) {
 // MODAL
 // ===================================================================
 
+let FORCE_PIN_CHANGE = false; // true while the mandatory first-login PIN change is open — blocks dismissal
+
 function bindModal() {
-  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('modalCloseBtn').addEventListener('click', () => { if (!FORCE_PIN_CHANGE) closeModal(); });
   document.getElementById('modalOverlay').addEventListener('click', (e) => {
-    if (e.target.id === 'modalOverlay') closeModal();
+    if (e.target.id === 'modalOverlay' && !FORCE_PIN_CHANGE) closeModal();
   });
 }
 
@@ -410,11 +481,19 @@ function openModal(title, bodyHtml) {
   document.getElementById('modalTitle').textContent = title;
   document.getElementById('modalBody').innerHTML = bodyHtml;
   document.getElementById('modalOverlay').classList.remove('hidden');
+  document.getElementById('modalCloseBtn').classList.toggle('hidden', FORCE_PIN_CHANGE);
 }
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.add('hidden');
   document.getElementById('modalBody').innerHTML = '';
+}
+
+/** Shared PIN validity rule used by both the forced first-login change and Settings. */
+function isValidNewPin(pin, userId) {
+  if (!/^\d{4,}$/.test(pin)) return 'PIN must be at least 4 digits.';
+  if (pin === String(userId).trim()) return 'New PIN can\'t be the same as your User ID.';
+  return null;
 }
 
 // ===================================================================
@@ -1073,7 +1152,8 @@ function renderRequestDetailModal(detail) {
         <td data-label="Action">
           ${canAct ? `
             <div class="action-btns">
-              <input type="number" class="item-qty-input" placeholder="Qty" value="${escapeHtml(item.qtyRequested)}">
+              <input type="number" class="item-qty-input" placeholder="Approved qty" value="${escapeHtml(item.qtyRequested)}" title="Only used when approving">
+              <input type="text" class="item-remarks-input" placeholder="Remarks (required for reject/clarify)">
               <button class="btn btn-primary btn-sm item-approve-btn">Approve</button>
               <button class="btn btn-danger btn-sm item-reject-btn">Reject</button>
               <button class="btn btn-secondary btn-sm item-clarify-btn">Clarify</button>
@@ -1164,19 +1244,33 @@ function bindRequestDetailActions(requestId, request, items) {
       const row = e.target.closest('tr');
       const itemId = row.dataset.itemId;
       const qtyInput = row.querySelector('.item-qty-input');
+      const remarksInput = row.querySelector('.item-remarks-input');
       const decision = btn.classList.contains('item-approve-btn') ? 'Approved'
         : btn.classList.contains('item-reject-btn') ? 'Rejected' : 'Need Clarification';
-      const remarks = decision !== 'Approved' ? (prompt('Remarks (optional):') || '') : '';
-      btn.disabled = true;
+      const remarks = remarksInput ? remarksInput.value.trim() : '';
+
+      if (decision !== 'Approved' && !remarks) {
+        toast('Add a remark before rejecting or requesting clarification.', 'error');
+        if (remarksInput) remarksInput.focus();
+        return;
+      }
+
+      row.querySelectorAll('.action-btns button').forEach(b => b.disabled = true);
       try {
         await Api.reviewRequestItem({
-          itemId, decision, qtyApproved: qtyInput ? qtyInput.value : '', remarks, actorUserId: SESSION.userId
+          itemId,
+          decision,
+          // qty only matters on approval — sending it on reject/clarify risked the
+          // leftover approved-qty box value being recorded against a rejected item.
+          qtyApproved: decision === 'Approved' && qtyInput ? qtyInput.value : '',
+          remarks,
+          actorUserId: SESSION.userId
         });
         toast('Item updated.', 'success');
         openRequestDetail(requestId);
       } catch (err) {
         toast(err.message, 'error');
-        btn.disabled = false;
+        row.querySelectorAll('.action-btns button').forEach(b => b.disabled = false);
       }
     });
   });
@@ -1639,13 +1733,20 @@ async function submitNewRequest() {
   if (!shopId || !storeName) { errorEl.textContent = 'Look up a valid Shop ID first.'; return; }
   if (!purpose || !reason) { errorEl.textContent = 'Purpose and reason are required.'; return; }
 
-  const items = [];
+  // Merge by materialId instead of pushing every row as-is — picking the same
+  // material in two rows should sum into one line item, not create a duplicate.
+  const itemsByMaterial = new Map();
+  let validRowCount = 0;
   document.querySelectorAll('#nrItemsContainer .item-row').forEach(row => {
     const materialId = row.querySelector('.nr-item-material-value').value;
     const qty = Number(row.querySelector('.nr-item-qty').value || 0);
-    if (materialId && qty > 0) items.push({ materialId, qty });
+    if (!materialId || qty <= 0) return;
+    validRowCount++;
+    itemsByMaterial.set(materialId, (itemsByMaterial.get(materialId) || 0) + qty);
   });
+  const items = Array.from(itemsByMaterial, ([materialId, qty]) => ({ materialId, qty }));
   if (!items.length) { errorEl.textContent = 'Add at least one material with a valid quantity.'; return; }
+  if (items.length < validRowCount) toast('Duplicate materials were combined into one line item.', 'success');
 
   const btn = document.getElementById('nrSubmitBtn');
   btn.disabled = true;
@@ -1987,12 +2088,16 @@ function bindSettings() {
 
     if (!currentPin || !newPin) { errorEl.textContent = 'Fill in all fields.'; return; }
     if (newPin !== confirmPin) { errorEl.textContent = 'New PIN and confirmation do not match.'; return; }
+    const validationError = isValidNewPin(newPin, SESSION.userId);
+    if (validationError) { errorEl.textContent = validationError; return; }
 
     const btn = document.getElementById('stSaveBtn');
     btn.disabled = true;
     try {
       await Api.login(SESSION.userId, currentPin);
       await Api.resetPin(SESSION.userId, newPin, SESSION.userId);
+      SESSION.pinStatus = 'Active';
+      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION, JSON.stringify(SESSION));
       toast('PIN updated.', 'success');
       document.getElementById('stCurrentPin').value = '';
       document.getElementById('stNewPin').value = '';
