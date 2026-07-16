@@ -41,7 +41,7 @@ const NAV_BY_ROLE = {
     { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
     { id: 'materials', label: 'Materials & Inventory', icon: 'box' },
     { id: 'requests', label: 'Requests', icon: 'list' },
-    { id: 'approvalWindows', label: 'Approval Windows', icon: 'calendar' },
+    { id: 'performance', label: 'Team Performance', icon: 'trendingUp' },
     { id: 'activityLog', label: 'Activity Logs', icon: 'clock' },
     { id: 'users', label: 'User Management', icon: 'users' },
     { id: 'settings', label: 'Settings', icon: 'settings' }
@@ -51,7 +51,6 @@ const NAV_BY_ROLE = {
     { id: 'requests', label: 'Requests to Review', icon: 'list' },
     { id: 'performance', label: 'Team Performance', icon: 'trendingUp' },
     { id: 'materials', label: 'Materials & Inventory', icon: 'box' },
-    { id: 'approvalWindows', label: 'Approval Windows', icon: 'calendar' },
     { id: 'activityLog', label: 'Activity Logs', icon: 'clock' },
     { id: 'settings', label: 'Settings', icon: 'settings' }
   ],
