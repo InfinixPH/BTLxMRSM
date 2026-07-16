@@ -702,6 +702,59 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .item-row-remove:hover { background: var(--red-dim); color: var(--red); }
 .item-row-remove svg { width: 16px; height: 16px; }
 
+/* Searchable, category-grouped material picker (replaces the plain <select> so
+   requestors aren't scrolling a long flat list once materials grow). */
+.material-combo { position: relative; width: 100%; }
+.material-combo input.nr-item-material-search {
+  width: 100%;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-hover) 90%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border) 68%);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.material-combo input.nr-item-material-search:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface-hover) 85%); }
+.material-combo input.nr-item-material-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.material-combo input.nr-item-material-search::placeholder { color: var(--text-muted); }
+.material-combo-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+}
+.material-combo-panel.hidden { display: none; }
+.material-combo-group-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  padding: 8px 10px 4px;
+}
+.material-combo-option {
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.material-combo-option:hover,
+.material-combo-option.active { background: var(--accent-dim); color: var(--accent-strong); }
+.material-combo-unit { color: var(--text-muted); font-size: 12px; }
+.material-combo-empty { padding: 12px 10px; font-size: 13px; color: var(--text-muted); }
+
 /* ===================================================================
    TABLE ACTIONS / MISC
 =================================================================== */
