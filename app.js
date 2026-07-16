@@ -11,7 +11,6 @@ let STATE = {              // in-memory app data, hydrated from cache then netwo
   materials: [],
   requests: [],
   notifications: [],
-  approvalWindows: [],
   timeline: [],
   lastUpdate: null
 };
@@ -460,7 +459,6 @@ function renderView(view) {
     case 'requests': content.innerHTML = viewRequests(); bindRequests(); break;
     case 'performance': content.innerHTML = viewPerformanceShell(); loadPerformance(); break;
     case 'newRequest': content.innerHTML = viewNewRequestForm(); bindNewRequestForm(); break;
-    case 'approvalWindows': content.innerHTML = viewApprovalWindows(); bindApprovalWindows(); break;
     case 'activityLog': content.innerHTML = viewActivityLogShell(); loadActivityLog(); break;
     case 'users': content.innerHTML = viewUsersShell(); loadUsers(); break;
     case 'settings': content.innerHTML = viewSettings(); bindSettings(); break;
@@ -1212,7 +1210,6 @@ function bindRequestDetailActions(requestId) {
 // ===================================================================
 
 function viewNewRequestForm() {
-  const openWindows = (STATE.approvalWindows || []).filter(w => w.status === 'Open');
   return `
     <div class="page-header"><div><span class="page-kicker">Submit</span><h1 class="page-title">New Request</h1></div></div>
     <div class="card">
@@ -1231,14 +1228,6 @@ function viewNewRequestForm() {
           <span class="field-label">Request Type</span>
           <select id="nrType">${REQUEST_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
         </div>
-        ${openWindows.length ? `
-        <div class="field">
-          <span class="field-label">Approval Window (optional)</span>
-          <select id="nrWindow">
-            <option value="">— None —</option>
-            ${openWindows.map(w => `<option value="${escapeHtml(w.windowId)}">${escapeHtml(w.windowName)}</option>`).join('')}
-          </select>
-        </div>` : ''}
         <div class="field span-2"><span class="field-label">Purpose</span><textarea id="nrPurpose" placeholder="What is this request for?"></textarea></div>
         <div class="field span-2"><span class="field-label">Reason</span><textarea id="nrReason" placeholder="Why is it needed?"></textarea></div>
         <div class="field span-2"><span class="field-label">Photo Links (optional, comma-separated URLs)</span><input id="nrPhotoLinks" placeholder="https://..."></div>
@@ -1331,8 +1320,7 @@ async function submitNewRequest() {
   const purpose = document.getElementById('nrPurpose').value.trim();
   const reason = document.getElementById('nrReason').value.trim();
   const photoLinks = document.getElementById('nrPhotoLinks').value.trim();
-  const windowEl = document.getElementById('nrWindow');
-  const approvalWindowId = windowEl ? windowEl.value : '';
+  const approvalWindowId = '';
 
   if (!shopId || !storeName) { errorEl.textContent = 'Look up a valid Shop ID first.'; return; }
   if (!purpose || !reason) { errorEl.textContent = 'Purpose and reason are required.'; return; }
@@ -1363,69 +1351,6 @@ async function submitNewRequest() {
     btn.disabled = false;
     btn.textContent = 'Submit Request';
   }
-}
-
-// ===================================================================
-// APPROVAL WINDOWS
-// ===================================================================
-
-function viewApprovalWindows() {
-  const rows = (STATE.approvalWindows || []).slice().reverse().map(w => `
-    <tr>
-      <td class="mono" data-label="ID">${escapeHtml(w.windowId)}</td>
-      <td data-label="Name">${escapeHtml(w.windowName)}</td>
-      <td data-label="Start">${formatDate(w.startDate)}</td>
-      <td data-label="End">${formatDate(w.endDate)}</td>
-      <td data-label="Status"><span class="stamp ${w.status === 'Open' ? 'stamp-approved' : 'stamp-inactive'}">${escapeHtml(w.status || '—')}</span></td>
-      <td data-label="Created By">${escapeHtml(w.createdBy)}</td>
-    </tr>
-  `).join('');
-
-  return `
-    <div class="page-header"><div><span class="page-kicker">Scheduling</span><h1 class="page-title">Approval Windows</h1></div></div>
-    ${isAdmin() ? `
-    <div class="card" style="margin-bottom:20px;">
-      <div class="section-title">Create New Window</div>
-      <div class="form-grid">
-        <div class="field"><span class="field-label">Window Name</span><input id="awName" placeholder="e.g. Q3 2026 Store Refresh"></div>
-        <div class="field"><span class="field-label">Start Date</span><input id="awStart" type="date"></div>
-        <div class="field"><span class="field-label">End Date</span><input id="awEnd" type="date"></div>
-      </div>
-      <p class="login-error" id="awError"></p>
-      <div class="form-actions"><button class="btn btn-primary" id="awCreateBtn">Create Window</button></div>
-    </div>` : ''}
-    <div class="card table-wrap">
-      <table class="data-table">
-        <thead><tr><th>ID</th><th>Name</th><th>Start</th><th>End</th><th>Status</th><th>Created By</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>No approval windows yet.</td></tr>`}</tbody>
-      </table>
-    </div>
-  `;
-}
-
-function bindApprovalWindows() {
-  const btn = document.getElementById('awCreateBtn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    const errorEl = document.getElementById('awError');
-    const windowName = document.getElementById('awName').value.trim();
-    const startDate = document.getElementById('awStart').value;
-    const endDate = document.getElementById('awEnd').value;
-    if (!windowName || !startDate || !endDate) {
-      errorEl.textContent = 'All fields are required.';
-      return;
-    }
-    btn.disabled = true;
-    try {
-      await Api.createApprovalWindow({ windowName, startDate, endDate, actorUserId: SESSION.userId });
-      toast('Approval window created.', 'success');
-      await refreshBootstrap(`${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`);
-    } catch (err) {
-      errorEl.textContent = err.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
 }
 
 // ===================================================================
