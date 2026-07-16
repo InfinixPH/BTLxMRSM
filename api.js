@@ -88,19 +88,25 @@ const Api = {
 
   lookupShop: (shopId) => SheetsClient.lookupShop(shopId),
 
-  /** One batched call for everything a dashboard needs on first paint — same shape as handleGetBootstrap. */
+  /** One batched call for everything a dashboard needs on first paint — same shape as handleGetBootstrap.
+   *  REQUEST_TIMELINE is included full (not per-request) so BTL Team Performance stats can be computed
+   *  client-side without an extra round trip per request. */
   async getBootstrap(role, userId) {
     const data = await SheetsClient.batchGetObjects([
       SHEET_TABS.MATERIALS, SHEET_TABS.REQUESTS, SHEET_TABS.NOTIFICATIONS,
-      SHEET_TABS.APPROVAL_WINDOWS, SHEET_TABS.CONFIG
+      SHEET_TABS.APPROVAL_WINDOWS, SHEET_TABS.CONFIG, SHEET_TABS.REQUEST_TIMELINE
     ]);
     const lastUpdateRow = data[SHEET_TABS.CONFIG].find(r => r.key === 'LAST_DATA_UPDATE');
     const targetUserId = String(userId).trim();
+    const requests = Api._filterRequestsForUser(data[SHEET_TABS.REQUESTS], role, userId);
+    const visibleRequestIds = new Set(requests.map(r => String(r.requestId).trim()));
     return {
       materials: data[SHEET_TABS.MATERIALS],
-      requests: Api._filterRequestsForUser(data[SHEET_TABS.REQUESTS], role, userId),
+      requests,
       notifications: data[SHEET_TABS.NOTIFICATIONS].filter(n => String(n.userId).trim() === targetUserId),
       approvalWindows: data[SHEET_TABS.APPROVAL_WINDOWS],
+      // Same visibility rule as requests: a requestor never sees other people's timeline entries.
+      timeline: data[SHEET_TABS.REQUEST_TIMELINE].filter(t => visibleRequestIds.has(String(t.requestId).trim())),
       lastUpdate: lastUpdateRow ? lastUpdateRow.value : null
     };
   },
