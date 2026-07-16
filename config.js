@@ -49,6 +49,7 @@ const NAV_BY_ROLE = {
   BTL: [
     { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
     { id: 'requests', label: 'Requests to Review', icon: 'list' },
+    { id: 'performance', label: 'Team Performance', icon: 'trendingUp' },
     { id: 'materials', label: 'Materials & Inventory', icon: 'box' },
     { id: 'approvalWindows', label: 'Approval Windows', icon: 'calendar' },
     { id: 'activityLog', label: 'Activity Logs', icon: 'clock' },
