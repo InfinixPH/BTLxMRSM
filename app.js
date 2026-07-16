@@ -137,6 +137,7 @@ function bindLoginForm() {
 
 function logout() {
   clearInterval(pollTimer);
+  currentCacheKey = null;
   localStorage.removeItem(CONFIG.STORAGE_KEYS.SESSION);
   SESSION = null;
   document.getElementById('appShell').classList.add('hidden');
@@ -163,6 +164,7 @@ function enterApp() {
     }
 
     const cacheKey = `${CONFIG.STORAGE_KEYS.BOOTSTRAP_CACHE}_${SESSION.userId}`;
+    currentCacheKey = cacheKey;
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
       STATE = JSON.parse(cached);
@@ -170,14 +172,38 @@ function enterApp() {
     renderView(currentView);
 
     refreshBootstrap(cacheKey);
-
-    clearInterval(pollTimer);
-    pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
+    startPolling(cacheKey);
+    bindVisibilityPolling();
   } catch (err) {
     console.error('enterApp failed:', err);
     document.getElementById('content').innerHTML =
       `<div class="page-header"><h1 class="page-title">Something went wrong</h1></div><p class="empty-state">${escapeHtml(err.message)}</p>`;
   }
+}
+
+let currentCacheKey = null;
+
+function startPolling(cacheKey) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
+}
+
+let visibilityBound = false;
+/** Backgrounded/minimized tabs shouldn't keep polling every 8s — with several
+ *  people leaving tabs open all day this was pure wasted Sheets API quota.
+ *  Pause while hidden, and catch up immediately the moment the tab is refocused. */
+function bindVisibilityPolling() {
+  if (visibilityBound) return; // listener persists across enterApp() re-runs, only bind once
+  visibilityBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (!SESSION || !currentCacheKey) return;
+    if (document.hidden) {
+      clearInterval(pollTimer);
+    } else {
+      checkForUpdates(currentCacheKey);
+      startPolling(currentCacheKey);
+    }
+  });
 }
 
 async function refreshBootstrap(cacheKey) {
@@ -326,12 +352,17 @@ function clearGlobalSearch() {
 
 function bindTopbarSearch() {
   const input = document.getElementById('globalSearch');
+  let debounceTimer = null;
   input.addEventListener('input', () => {
-    GLOBAL_SEARCH = input.value.trim().toLowerCase();
-    if (currentView === 'requests') { REQUESTS_PAGE = 1; renderRequestsPage(); }
-    else if (currentView === 'materials') { MATERIALS_PAGE = 1; renderMaterialsTable(); }
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      GLOBAL_SEARCH = input.value.trim().toLowerCase();
+      if (currentView === 'requests') { REQUESTS_PAGE = 1; renderRequestsPage(); }
+      else if (currentView === 'materials') { MATERIALS_PAGE = 1; renderMaterialsTable(); }
+    }, 180);
   });
   document.getElementById('searchCloseBtn').addEventListener('click', () => {
+    clearTimeout(debounceTimer);
     if (GLOBAL_SEARCH) { clearGlobalSearch(); renderView(currentView); }
   });
 }
@@ -959,8 +990,8 @@ function openMaterialModal(material) {
       <div class="field"><span class="field-label">Category</span><input id="matCategory" value="${escapeHtml(material?.category || '')}"></div>
       <div class="field"><span class="field-label">Material Name</span><input id="matName" value="${escapeHtml(material?.materialName || '')}"></div>
       <div class="field"><span class="field-label">Unit</span><input id="matUnit" value="${escapeHtml(material?.unit || '')}" placeholder="pcs, box, roll..."></div>
-      <div class="field"><span class="field-label">Current Stock</span><input id="matStock" type="number" value="${escapeHtml(material?.currentStock ?? 0)}"></div>
-      <div class="field"><span class="field-label">Reorder Level</span><input id="matReorder" type="number" value="${escapeHtml(material?.reorderLevel ?? 0)}"></div>
+      <div class="field"><span class="field-label">Current Stock</span><input id="matStock" type="number" min="0" value="${escapeHtml(material?.currentStock ?? 0)}"></div>
+      <div class="field"><span class="field-label">Reorder Level</span><input id="matReorder" type="number" min="0" value="${escapeHtml(material?.reorderLevel ?? 0)}"></div>
       <div class="field">
         <span class="field-label">Status</span>
         <select id="matStatus">
@@ -969,6 +1000,7 @@ function openMaterialModal(material) {
         </select>
       </div>
     </div>
+    ${isEdit && Number(material.reservedStock || 0) > 0 ? `<p class="form-note">${escapeHtml(material.reservedStock)} ${escapeHtml(material.unit || '')} currently reserved on pending requests — Current Stock can't be set below that.</p>` : ''}
     <p class="login-error" id="matModalError"></p>
     <div class="form-actions">
       <button class="btn btn-primary" id="matSaveBtn">${isEdit ? 'Save Changes' : 'Add Material'}</button>
@@ -984,13 +1016,18 @@ function openMaterialModal(material) {
       category: document.getElementById('matCategory').value.trim(),
       materialName: document.getElementById('matName').value.trim(),
       unit: document.getElementById('matUnit').value.trim(),
-      currentStock: Number(document.getElementById('matStock').value || 0),
-      reorderLevel: Number(document.getElementById('matReorder').value || 0),
+      currentStock: Math.max(0, Number(document.getElementById('matStock').value || 0)),
+      reorderLevel: Math.max(0, Number(document.getElementById('matReorder').value || 0)),
       status: document.getElementById('matStatus').value,
       actorUserId: SESSION.userId
     };
     if (!payload.materialName || !payload.unit) {
       errorEl.textContent = 'Material name and unit are required.';
+      return;
+    }
+    const reserved = isEdit ? Number(material.reservedStock || 0) : 0;
+    if (payload.currentStock < reserved) {
+      errorEl.textContent = `Current Stock can't be less than the ${reserved} ${material.unit || ''} already reserved on pending requests.`;
       return;
     }
     try {
@@ -2037,7 +2074,15 @@ function openResetPinModal(targetUserId) {
   document.getElementById('rpCancelBtn').addEventListener('click', closeModal);
   document.getElementById('rpSaveBtn').addEventListener('click', async () => {
     const errorEl = document.getElementById('rpError');
-    const newPin = document.getElementById('rpNewPin').value.trim() || targetUserId;
+    const typed = document.getElementById('rpNewPin').value.trim();
+    const newPin = typed || targetUserId;
+    // Only enforce the strength rule when Admin actually typed something — the
+    // blank/"reset to User ID" fallback is an intentionally weak, temporary PIN
+    // that the person is expected to change (same as a brand-new account).
+    if (typed) {
+      const validationError = isValidNewPin(typed, targetUserId);
+      if (validationError) { errorEl.textContent = validationError; return; }
+    }
     try {
       await Api.resetPin(targetUserId, newPin, SESSION.userId);
       closeModal();
