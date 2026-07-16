@@ -43,7 +43,8 @@ const ICONS = {
   alertTriangle: '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>',
   close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-  trendingUp: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
+  trendingUp: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
+  printer: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'
 };
 
 // Small helper so freshly-added icons always carry the viewBox their 24x24
@@ -1096,6 +1097,7 @@ function renderRequestDetailModal(detail) {
   const allReviewed = items.every(i => i.itemStatus !== 'Pending');
   const showFinalize = canReviewRequests() && request.currentStage === 'BTL Review' && allReviewed && items.length > 0;
   const showRelease = canReleaseRequests() && request.overallStatus === 'Approved';
+  const showTransmittal = canReviewRequests() || canReleaseRequests();
 
   document.getElementById('modalBody').innerHTML = `
     <div class="form-grid">
@@ -1116,6 +1118,12 @@ function renderRequestDetailModal(detail) {
         <tbody>${itemRows || `<tr><td colspan="6" class="empty-state">No items.</td></tr>`}</tbody>
       </table>
     </div>
+
+    ${showTransmittal ? `
+      <div class="form-actions" style="margin-top:14px;">
+        <button type="button" class="btn btn-secondary" id="printTransmittalBtn">${svgIcon('printer')} Print Transmittal</button>
+      </div>
+    ` : ''}
 
     ${showFinalize ? `
       <div class="section-title">Finalize Review</div>
@@ -1144,10 +1152,13 @@ function renderRequestDetailModal(detail) {
     <div class="timeline">${timelineHtml || '<p class="empty-state">No activity yet.</p>'}</div>
   `;
 
-  bindRequestDetailActions(request.requestId);
+  bindRequestDetailActions(request.requestId, request, items);
 }
 
-function bindRequestDetailActions(requestId) {
+function bindRequestDetailActions(requestId, request, items) {
+  const printBtn = document.getElementById('printTransmittalBtn');
+  if (printBtn) printBtn.addEventListener('click', () => printTransmittal(request, items));
+
   document.querySelectorAll('.item-approve-btn, .item-reject-btn, .item-clarify-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const row = e.target.closest('tr');
@@ -1205,6 +1216,93 @@ function bindRequestDetailActions(requestId) {
   }
 }
 
+/** Builds and opens a print-ready Transmittal Form for a request, matching the
+ *  layout BTL already uses in the Google Sheets version (header block, then a
+ *  Materials/Quantity/Remarks table, notes, and a sign-off section) so the
+ *  printed page can go straight into the delivery box. */
+function printTransmittal(request, items) {
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+  const total = items.reduce((sum, i) => {
+    const qty = i.qtyApproved !== '' && i.qtyApproved !== undefined ? Number(i.qtyApproved) : Number(i.qtyRequested);
+    return sum + (isNaN(qty) ? 0 : qty);
+  }, 0);
+
+  const rows = items.map(item => {
+    const material = findMaterial(item.materialId);
+    const name = material ? material.materialName : item.materialId;
+    const qty = item.qtyApproved !== '' && item.qtyApproved !== undefined ? item.qtyApproved : item.qtyRequested;
+    return `<tr><td class="tf-material">${escapeHtml(name)}</td><td class="tf-qty">${escapeHtml(qty)}</td><td></td></tr>`;
+  }).join('');
+  // Pad with a handful of blank rows so the printed table has room for
+  // manually-added items, matching the blank ruled rows in the sheet version.
+  const blankRows = Array.from({ length: 8 }, () => `<tr><td></td><td></td><td></td></tr>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Transmittal Form — ${escapeHtml(request.requestId)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 32px 40px; }
+  h1 { text-align: center; font-size: 26px; letter-spacing: 0.02em; margin-bottom: 14px; }
+  .tf-rule { border: none; border-top: 2px solid #111; margin-bottom: 16px; }
+  .tf-header { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 13.5px; margin-bottom: 18px; }
+  .tf-header .label { font-weight: 700; }
+  .tf-red { color: #c0281c; font-weight: 700; }
+  table.tf-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
+  table.tf-table th, table.tf-table td { border: 1px solid #999; padding: 6px 8px; font-size: 13px; }
+  table.tf-table thead .tf-band-total th { background: #c0281c; color: #fff; text-align: center; }
+  table.tf-table thead .tf-band-alloc th { background: #17324a; color: #fff; text-align: center; }
+  table.tf-table thead .tf-band-labels th { background: #cfcfcf; }
+  .tf-qty { text-align: center; font-weight: 700; }
+  .tf-material { }
+  .tf-notes { font-size: 12.5px; margin-bottom: 20px; }
+  .tf-notes div { margin-bottom: 4px; }
+  .tf-sign { font-size: 13.5px; }
+  .tf-sign div { margin-bottom: 22px; border-bottom: 1px solid #111; width: 340px; padding-bottom: 2px; }
+  @media print { body { padding: 12px 24px; } }
+</style>
+</head><body>
+  <h1>TRANSMITTAL FORM</h1>
+  <hr class="tf-rule">
+  <div class="tf-header">
+    <div><span class="label">TO:</span> ${escapeHtml(request.storeName)}</div>
+    <div><span class="label">DATED:</span> <span class="tf-red">${dateStr}</span></div>
+    <div><span class="label">ADDRESS:</span> ${escapeHtml(request.region || '')}</div>
+    <div><span class="label">CATEGORY:</span> <span class="tf-red">${escapeHtml(request.requestType || '')}</span></div>
+    <div><span class="label">CONTACT PERSON:</span> ${escapeHtml(request.rssName || '')}</div>
+    <div><span class="label">DISPATCH NO.:</span> ${escapeHtml(request.requestId)}</div>
+    <div><span class="label">CONTACT NO.:</span> ${escapeHtml(request.contactNumber || '')}</div>
+  </div>
+  <table class="tf-table">
+    <thead>
+      <tr class="tf-band-total"><th colspan="3">RECEIVING</th></tr>
+      <tr class="tf-band-alloc"><th colspan="3">ALLOCATION</th></tr>
+      <tr class="tf-band-labels"><th>MATERIALS</th><th>QUANTITY (${total})</th><th>REMARKS</th></tr>
+    </thead>
+    <tbody>${rows}${blankRows}</tbody>
+  </table>
+  <div class="tf-notes">
+    <strong>NOTES:</strong>
+    <div>✓ All items inspected at time of receipt</div>
+    <div>✓ Sign the Waybill and Transmittal Form</div>
+    <div>✓ If there are missing or damaged items, report to the BTL Team within 24 hours (Late reports will not be accepted)</div>
+    <div>✓ Upload this Transmittal to DCR for Receiving Records.</div>
+  </div>
+  <div class="tf-sign">
+    <div><strong>PREPARED BY:</strong></div>
+    <div><strong>NAME &amp; SIGNATURE:</strong></div>
+    <div><strong>DATE:</strong></div>
+  </div>
+<script>window.onload = function() { window.print(); };</script>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { toast('Please allow pop-ups to print the transmittal.', 'error'); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
 // ===================================================================
 // NEW REQUEST FORM
 // ===================================================================
@@ -1234,6 +1332,7 @@ function viewNewRequestForm() {
       </div>
 
       <div class="section-title">Materials Requested</div>
+      <div class="item-row-header"><span>Material</span><span>Qty</span><span></span></div>
       <div id="nrItemsContainer"></div>
       <button type="button" class="btn btn-secondary btn-sm" id="nrAddItemBtn">+ Add material</button>
 
@@ -1455,6 +1554,11 @@ async function submitNewRequest() {
 // ACTIVITY LOG
 // ===================================================================
 
+let ACTIVITY_LOG_CACHE = [];
+let ACTIVITY_LOG_QUERY = '';
+let ACTIVITY_PAGE = 1;
+let ACTIVITY_PAGE_SIZE = 25;
+
 function viewActivityLogShell() {
   return `
     <div class="page-header"><div><span class="page-kicker">Audit Trail</span><h1 class="page-title">Activity Logs</h1></div></div>
@@ -1469,17 +1573,18 @@ function viewActivityLogShell() {
 
 async function loadActivityLog() {
   const wrap = document.getElementById('logTableWrap');
+  ACTIVITY_LOG_QUERY = '';
+  ACTIVITY_PAGE = 1;
   try {
     const logs = await Api.getActivityLog(300);
-    renderActivityLogTable(logs.slice().reverse());
+    ACTIVITY_LOG_CACHE = logs.slice().reverse();
+    renderActivityLogPage();
     const search = document.getElementById('logSearch');
     if (search) {
       search.addEventListener('input', () => {
-        const q = search.value.trim().toLowerCase();
-        const filtered = logs.slice().reverse().filter(l =>
-          [l.userId, l.role, l.action, l.targetType, l.targetId, l.details].join(' ').toLowerCase().includes(q)
-        );
-        renderActivityLogTable(filtered);
+        ACTIVITY_LOG_QUERY = search.value.trim().toLowerCase();
+        ACTIVITY_PAGE = 1;
+        renderActivityLogPage();
       });
     }
   } catch (err) {
@@ -1487,10 +1592,24 @@ async function loadActivityLog() {
   }
 }
 
-function renderActivityLogTable(logs) {
+function renderActivityLogPage() {
   const wrap = document.getElementById('logTableWrap');
   if (!wrap) return;
-  const rows = logs.map(l => `
+
+  const all = ACTIVITY_LOG_QUERY
+    ? ACTIVITY_LOG_CACHE.filter(l =>
+        [l.userId, l.role, l.action, l.targetType, l.targetId, l.details].join(' ').toLowerCase().includes(ACTIVITY_LOG_QUERY)
+      )
+    : ACTIVITY_LOG_CACHE;
+
+  const total = all.length;
+  const totalPages = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
+  ACTIVITY_PAGE = Math.min(ACTIVITY_PAGE, totalPages);
+  const start = (ACTIVITY_PAGE - 1) * ACTIVITY_PAGE_SIZE;
+  const pageItems = all.slice(start, start + ACTIVITY_PAGE_SIZE);
+  const rangeLabel = total === 0 ? '0 of 0' : `${start + 1}–${Math.min(start + ACTIVITY_PAGE_SIZE, total)} of ${total}`;
+
+  const rows = pageItems.map(l => `
     <tr>
       <td data-label="Time">${formatDate(l.timestamp)}</td>
       <td class="mono" data-label="User">${escapeHtml(l.userId)}</td>
@@ -1501,12 +1620,42 @@ function renderActivityLogTable(logs) {
       <td data-label="Details">${escapeHtml(l.details)}</td>
     </tr>
   `).join('');
+
   wrap.innerHTML = `
+    ${total ? `
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <span class="field-label">Show</span>
+          <select id="logPageSize" class="page-size-select">
+            ${[25, 50, 100, 300].map(n => `<option value="${n}" ${n === ACTIVITY_PAGE_SIZE ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div class="table-toolbar-right">
+          <span class="page-range">${rangeLabel}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="logPrevBtn" aria-label="Previous page" ${ACTIVITY_PAGE <= 1 ? 'disabled' : ''}>${svgIcon('chevronLeft')}</button>
+          <span class="page-indicator">Page ${ACTIVITY_PAGE} of ${totalPages}</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="logNextBtn" aria-label="Next page" ${ACTIVITY_PAGE >= totalPages ? 'disabled' : ''}>${svgIcon('chevronRight')}</button>
+        </div>
+      </div>
+    ` : ''}
     <table class="data-table">
       <thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Target Type</th><th>Target ID</th><th>Details</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="7" class="empty-state"><div class="empty-state-icon">${svgIcon('inbox')}</div>No activity found.</td></tr>`}</tbody>
     </table>
   `;
+
+  if (!total) return;
+  document.getElementById('logPageSize').addEventListener('change', (e) => {
+    ACTIVITY_PAGE_SIZE = Number(e.target.value);
+    ACTIVITY_PAGE = 1;
+    renderActivityLogPage();
+  });
+  document.getElementById('logPrevBtn').addEventListener('click', () => {
+    if (ACTIVITY_PAGE > 1) { ACTIVITY_PAGE -= 1; renderActivityLogPage(); }
+  });
+  document.getElementById('logNextBtn').addEventListener('click', () => {
+    if (ACTIVITY_PAGE < totalPages) { ACTIVITY_PAGE += 1; renderActivityLogPage(); }
+  });
 }
 
 // ===================================================================
