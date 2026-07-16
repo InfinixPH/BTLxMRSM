@@ -94,7 +94,7 @@ const Api = {
   async getBootstrap(role, userId) {
     const data = await SheetsClient.batchGetObjects([
       SHEET_TABS.MATERIALS, SHEET_TABS.REQUESTS, SHEET_TABS.NOTIFICATIONS,
-      SHEET_TABS.APPROVAL_WINDOWS, SHEET_TABS.CONFIG, SHEET_TABS.REQUEST_TIMELINE
+      SHEET_TABS.CONFIG, SHEET_TABS.REQUEST_TIMELINE
     ]);
     const lastUpdateRow = data[SHEET_TABS.CONFIG].find(r => r.key === 'LAST_DATA_UPDATE');
     const targetUserId = String(userId).trim();
@@ -104,7 +104,6 @@ const Api = {
       materials: data[SHEET_TABS.MATERIALS],
       requests,
       notifications: data[SHEET_TABS.NOTIFICATIONS].filter(n => String(n.userId).trim() === targetUserId),
-      approvalWindows: data[SHEET_TABS.APPROVAL_WINDOWS],
       // Same visibility rule as requests: a requestor never sees other people's timeline entries.
       timeline: data[SHEET_TABS.REQUEST_TIMELINE].filter(t => visibleRequestIds.has(String(t.requestId).trim())),
       lastUpdate: lastUpdateRow ? lastUpdateRow.value : null
@@ -117,7 +116,6 @@ const Api = {
   finalizeRequestReview: (payload) => Api.post('finalizeRequestReview', payload),
   releaseRequest: (payload) => Api.post('releaseRequest', payload),
   markNotificationRead: (notificationId) => Api.post('markNotificationRead', { notificationId }),
-  createApprovalWindow: (payload) => Api.post('createApprovalWindow', payload),
   upsertMaterial: (payload) => Api.post('upsertMaterial', payload),
   upsertPersonnel: (payload) => Api.post('upsertPersonnel', payload)
 };
