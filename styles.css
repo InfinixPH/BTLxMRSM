@@ -602,7 +602,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
   /* Material line rows in New Request: drop the rigid 3-column grid so
      the quantity field and remove button don't get squeezed. */
-  .item-row { grid-template-columns: 1fr 96px 36px; gap: 6px; }
+  .item-row, .item-row-header { grid-template-columns: 1fr 96px 36px; gap: 6px; }
 
   table.data-table td[data-label="Action"] { grid-column: 1 / -1; }
   .action-btns { width: 100%; }
@@ -659,7 +659,23 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 /* ===================================================================
    ITEM ROW REPEATER (New Request material lines)
+   Sizing/padding/font is intentionally identical to `.field input`
+   (13px 14px padding, 14px font, flat bg-elevated fill) so this section
+   reads as part of the same form as Shop Details above it, instead of
+   a visually distinct widget with its own smaller, tinted controls.
 =================================================================== */
+
+.item-row-header {
+  display: grid;
+  grid-template-columns: 1fr 110px 36px;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.item-row-header span {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
 
 .item-row {
   display: grid;
@@ -671,20 +687,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .item-row select, .item-row input { width: 100%; }
 .item-row select,
 .item-row input[type="number"] {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-hover) 90%);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border) 68%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 11px 12px;
-  font-size: 13.5px;
+  padding: 13px 14px;
+  font-size: 14px;
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
-}
-.item-row select:hover,
-.item-row input[type="number"]:hover {
-  background: color-mix(in srgb, var(--accent) 15%, var(--surface-hover) 85%);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .item-row select:focus,
 .item-row input[type="number"]:focus {
@@ -693,7 +703,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .item-row select option { background: var(--bg-elevated); color: var(--text-primary); }
 .item-row-remove {
-  width: 36px; height: 36px;
+  width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -707,18 +717,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .material-combo { position: relative; width: 100%; }
 .material-combo input.nr-item-material-search {
   width: 100%;
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-hover) 90%);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border) 68%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 11px 12px;
-  font-size: 13.5px;
+  padding: 13px 14px;
+  font-size: 14px;
   color: var(--text-primary);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.material-combo input.nr-item-material-search:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface-hover) 85%); }
 .material-combo input.nr-item-material-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .material-combo input.nr-item-material-search::placeholder { color: var(--text-muted); }
 .material-combo-panel {
