@@ -12,6 +12,7 @@ let STATE = {              // in-memory app data, hydrated from cache then netwo
   requests: [],
   notifications: [],
   approvalWindows: [],
+  timeline: [],
   lastUpdate: null
 };
 let currentView = 'dashboard';
@@ -42,7 +43,8 @@ const ICONS = {
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   alertTriangle: '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/>',
-  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'
+  close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  trendingUp: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'
 };
 
 // Small helper so freshly-added icons always carry the viewBox their 24x24
@@ -456,6 +458,7 @@ function renderView(view) {
     case 'dashboard': content.innerHTML = viewDashboard(); bindDashboard(); break;
     case 'materials': content.innerHTML = viewMaterials(); bindMaterials(); break;
     case 'requests': content.innerHTML = viewRequests(); bindRequests(); break;
+    case 'performance': content.innerHTML = viewPerformanceShell(); loadPerformance(); break;
     case 'newRequest': content.innerHTML = viewNewRequestForm(); bindNewRequestForm(); break;
     case 'approvalWindows': content.innerHTML = viewApprovalWindows(); bindApprovalWindows(); break;
     case 'activityLog': content.innerHTML = viewActivityLogShell(); loadActivityLog(); break;
@@ -555,6 +558,213 @@ function kpiCard(label, value, type, icon, filterStatus) {
       </div>
     </div>
   `;
+}
+
+// ===================================================================
+// TEAM PERFORMANCE (BTL reviewer KPIs)
+// -----------------------------------------------------------------
+// Only BTL JB and BTL ETHAN actually approve/reject requests, so only they
+// get scored. BTL MANAGER just views this page. For each request:
+//   - "response time"  = last BTL-review timeline entry from the reviewer
+//                        minus the request's submitted timestamp. This is
+//                        how long it took the reviewer to reach a decision
+//                        (Approved / Rejected / Need Clarification).
+//   - "total turnaround" = only for requests that reached Completed/Released:
+//                        final timeline entry minus submitted timestamp.
+// If a request has entries from both reviewers, credit goes to whichever of
+// them has the LAST timeline entry (i.e. whoever gave the final decision).
+// Times include weekends/off-hours (raw elapsed time, not business days).
+// ===================================================================
+
+function groupTimelineByRequest() {
+  const map = {};
+  (STATE.timeline || []).forEach(t => {
+    const id = String(t.requestId).trim();
+    if (!map[id]) map[id] = [];
+    map[id].push(t);
+  });
+  Object.keys(map).forEach(id => map[id].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+  return map;
+}
+
+function msBetween(startVal, endVal) {
+  const start = new Date(startVal);
+  const end = new Date(endVal);
+  if (isNaN(start) || isNaN(end)) return null;
+  return end - start;
+}
+
+function formatDuration(ms) {
+  if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return '—';
+  const hours = ms / 3600000;
+  if (hours < 24) return `${hours.toFixed(1)} hrs`;
+  return `${(hours / 24).toFixed(1)} days`;
+}
+
+function average(nums) {
+  const clean = nums.filter(n => n !== null && n !== undefined && !isNaN(n));
+  if (!clean.length) return null;
+  return clean.reduce((a, b) => a + b, 0) / clean.length;
+}
+
+const COMPLETED_STATUSES = ['Completed', 'Released'];
+
+/** Builds per-reviewer stats: { userId -> { fullName, requests: [...], handled, completed, rejected, avgResponseMs, avgTotalMs } } */
+function computeReviewerPerformance(reviewers) {
+  const timelineByRequest = groupTimelineByRequest();
+  const reviewerIds = reviewers.map(r => String(r.rssUserId).trim());
+  const stats = {};
+  reviewers.forEach(r => {
+    stats[String(r.rssUserId).trim()] = {
+      userId: r.rssUserId, fullName: r.fullName || r.rssUserId,
+      requests: [], handled: 0, completed: 0, rejected: 0,
+      responseMsList: [], totalMsList: []
+    };
+  });
+
+  STATE.requests.forEach(request => {
+    const requestId = String(request.requestId).trim();
+    const entries = timelineByRequest[requestId] || [];
+    const btlEntries = entries.filter(e => reviewerIds.indexOf(String(e.actorUserId).trim()) !== -1);
+    if (!btlEntries.length) return; // not yet touched by a BTL reviewer
+
+    const decisionEntry = btlEntries[btlEntries.length - 1]; // last BTL action = final decision
+    const reviewerId = String(decisionEntry.actorUserId).trim();
+    const bucket = stats[reviewerId];
+    if (!bucket) return;
+
+    const responseMs = msBetween(request.timestamp, decisionEntry.timestamp);
+    const isCompleted = COMPLETED_STATUSES.indexOf(request.overallStatus) !== -1;
+    const isRejected = request.overallStatus === 'Rejected';
+    let totalMs = null;
+    if (isCompleted) {
+      const lastEntry = entries[entries.length - 1];
+      totalMs = msBetween(request.timestamp, lastEntry ? lastEntry.timestamp : decisionEntry.timestamp);
+    }
+
+    bucket.handled += 1;
+    if (isCompleted) bucket.completed += 1;
+    if (isRejected) bucket.rejected += 1;
+    bucket.responseMsList.push(responseMs);
+    if (totalMs !== null) bucket.totalMsList.push(totalMs);
+
+    bucket.requests.push({
+      requestId: request.requestId,
+      storeName: request.storeName,
+      requestType: request.requestType,
+      overallStatus: request.overallStatus,
+      submittedAt: request.timestamp,
+      decisionAt: decisionEntry.timestamp,
+      responseMs,
+      completedAt: isCompleted && entries.length ? entries[entries.length - 1].timestamp : null,
+      totalMs
+    });
+  });
+
+  Object.values(stats).forEach(bucket => {
+    bucket.avgResponseMs = average(bucket.responseMsList);
+    bucket.avgTotalMs = average(bucket.totalMsList);
+    bucket.requests.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  });
+
+  return stats;
+}
+
+function viewPerformanceShell() {
+  return `
+    <div class="page-header">
+      <div>
+        <span class="page-kicker">Team</span>
+        <h1 class="page-title">Team Performance</h1>
+        <p class="page-sub">Approval turnaround and workload per BTL reviewer</p>
+      </div>
+    </div>
+    <div id="performanceContent"><p class="empty-state">Loading...</p></div>
+  `;
+}
+
+async function loadPerformance() {
+  const wrap = document.getElementById('performanceContent');
+  try {
+    const personnel = await Api.getPersonnel();
+    const reviewers = personnel.filter(p => p.position === ROLES.BTL_JB || p.position === ROLES.BTL_ETHAN);
+    if (!reviewers.length) {
+      wrap.innerHTML = `<p class="empty-state">No BTL reviewers found.</p>`;
+      return;
+    }
+    const stats = computeReviewerPerformance(reviewers);
+    wrap.innerHTML = renderPerformanceBody(reviewers, stats);
+    bindPerformanceBody();
+  } catch (err) {
+    wrap.innerHTML = `<p class="empty-state">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderPerformanceBody(reviewers, stats) {
+  const teamHandled = Object.values(stats).reduce((sum, s) => sum + s.handled, 0);
+  const teamCompleted = Object.values(stats).reduce((sum, s) => sum + s.completed, 0);
+  const teamAvgResponse = average(Object.values(stats).flatMap(s => s.responseMsList));
+  const teamAvgTotal = average(Object.values(stats).flatMap(s => s.totalMsList));
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px;">
+      ${kpiCard('Requests Handled', teamHandled, 'total', 'list')}
+      ${kpiCard('Completed', teamCompleted, 'completed', 'box')}
+      ${kpiCard('Avg. Response Time', formatDuration(teamAvgResponse), 'pending', 'clock')}
+      ${kpiCard('Avg. Total Turnaround', formatDuration(teamAvgTotal), 'approved', 'trendingUp')}
+    </div>
+    ${reviewers.map(r => renderReviewerSection(stats[String(r.rssUserId).trim()])).join('')}
+  `;
+}
+
+function renderReviewerSection(bucket) {
+  if (!bucket) return '';
+  const completionRate = bucket.handled ? Math.round((bucket.completed / bucket.handled) * 100) : 0;
+  const rows = bucket.requests.map(r => `
+    <tr class="clickable" data-request-id="${escapeHtml(r.requestId)}">
+      <td class="mono" data-label="Request ID">${escapeHtml(r.requestId)}</td>
+      <td data-label="Store">${escapeHtml(r.storeName)}</td>
+      <td data-label="Submitted">${formatDate(r.submittedAt)}</td>
+      <td data-label="Decision">${formatDate(r.decisionAt)}</td>
+      <td data-label="Response Time">${formatDuration(r.responseMs)}</td>
+      <td data-label="Status">${stampFor(r.overallStatus)}</td>
+      <td data-label="Completed">${r.completedAt ? formatDate(r.completedAt) : '—'}</td>
+      <td data-label="Total Turnaround">${r.totalMs !== null ? formatDuration(r.totalMs) : '—'}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="card" style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="kpi-icon" style="width:38px;height:38px;">${svgIcon('users')}</div>
+          <div>
+            <h3 style="font-size:15px;">${escapeHtml(bucket.fullName)}</h3>
+            <p class="page-sub" style="margin:0;">${escapeHtml(bucket.userId)}</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <div><div class="kpi-label">Handled</div><div class="kpi-value" style="font-size:20px;">${bucket.handled}</div></div>
+          <div><div class="kpi-label">Completed</div><div class="kpi-value" style="font-size:20px;">${bucket.completed} <span style="font-size:12px;color:var(--text-secondary);">(${completionRate}%)</span></div></div>
+          <div><div class="kpi-label">Avg. Response</div><div class="kpi-value" style="font-size:20px;">${formatDuration(bucket.avgResponseMs)}</div></div>
+          <div><div class="kpi-label">Avg. Turnaround</div><div class="kpi-value" style="font-size:20px;">${formatDuration(bucket.avgTotalMs)}</div></div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>Request ID</th><th>Store</th><th>Submitted</th><th>Decision</th>
+            <th>Response Time</th><th>Status</th><th>Completed</th><th>Total Turnaround</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="8" class="empty-state">No requests handled yet.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function bindPerformanceBody() {
+  bindRequestRowClicks(document.getElementById('performanceContent'));
 }
 
 // ===================================================================
