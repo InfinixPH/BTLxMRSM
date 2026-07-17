@@ -798,7 +798,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .material-combo-option:hover,
 .material-combo-option.active { background: var(--accent-dim); color: var(--accent-strong); }
 .material-combo-unit { color: var(--text-muted); font-size: 12px; }
+.material-combo-available { float: right; font-size: 11px; color: var(--text-muted); }
 .material-combo-empty { padding: 12px 10px; font-size: 13px; color: var(--text-muted); }
+
+/* Qty input + available-stock hint stacked in the New Request item row. */
+.nr-item-qty-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nr-item-qty-wrap .nr-item-qty { width: 100%; }
+.nr-item-available { min-height: 0; }
 
 /* ===================================================================
    TABLE ACTIONS / MISC
