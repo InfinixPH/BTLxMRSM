@@ -136,7 +136,8 @@ function bindLoginForm() {
 }
 
 function logout() {
-  clearInterval(pollTimer);
+  clearTimeout(pollTimer);
+  pollFailureCount = 0;
   currentCacheKey = null;
   localStorage.removeItem(CONFIG.STORAGE_KEYS.SESSION);
   SESSION = null;
@@ -186,10 +187,22 @@ function enterApp() {
 }
 
 let currentCacheKey = null;
+let pollFailureCount = 0;
+const MAX_POLL_INTERVAL_MS = 120000; // cap backoff at 2 min so a prolonged outage doesn't go quiet forever
 
+/** Self-rescheduling instead of setInterval: lets each run pick its own next delay based
+ *  on whether the last call succeeded, so repeated failures (e.g. Sheets API rate limit)
+ *  back off exponentially instead of every client hammering the API on the same fixed 8s
+ *  cadence throughout the outage. Resets to the normal interval the moment a call succeeds. */
 function startPolling(cacheKey) {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(() => checkForUpdates(cacheKey), CONFIG.DEFAULT_POLL_INTERVAL_MS);
+  clearTimeout(pollTimer);
+  const delay = pollFailureCount > 0
+    ? Math.min(CONFIG.DEFAULT_POLL_INTERVAL_MS * Math.pow(2, pollFailureCount), MAX_POLL_INTERVAL_MS)
+    : CONFIG.DEFAULT_POLL_INTERVAL_MS;
+  pollTimer = setTimeout(async () => {
+    await checkForUpdates(cacheKey);
+    startPolling(cacheKey);
+  }, delay);
 }
 
 let visibilityBound = false;
@@ -202,7 +215,7 @@ function bindVisibilityPolling() {
   document.addEventListener('visibilitychange', () => {
     if (!SESSION || !currentCacheKey) return;
     if (document.hidden) {
-      clearInterval(pollTimer);
+      clearTimeout(pollTimer);
     } else {
       checkForUpdates(currentCacheKey);
       startPolling(currentCacheKey);
@@ -268,12 +281,14 @@ function promptForcedPinChange() {
 async function checkForUpdates(cacheKey) {
   try {
     const { lastUpdate } = await Api.getLastUpdate();
+    pollFailureCount = 0;
     if (lastUpdate && lastUpdate !== STATE.lastUpdate) {
       await refreshBootstrap(cacheKey);
     } else {
       setSyncStatus('synced');
     }
   } catch (err) {
+    pollFailureCount++;
     setSyncStatus('offline');
   }
 }
@@ -971,6 +986,7 @@ function renderMaterialsTable() {
     const available = (m.availableStock !== undefined && m.availableStock !== '')
       ? m.availableStock
       : (Number(m.currentStock || 0) - Number(m.reservedStock || 0));
+    const isLow = (m.status || 'Active') === 'Active' && Number(available) <= Number(m.reorderLevel || 0);
     return `
       <tr>
         <td class="mono" data-label="ID">${escapeHtml(m.materialId)}</td>
@@ -978,7 +994,7 @@ function renderMaterialsTable() {
         <td data-label="Category">${escapeHtml(m.category)}</td>
         <td data-label="Current">${escapeHtml(m.currentStock)} ${escapeHtml(m.unit)}</td>
         <td data-label="Reserved">${escapeHtml(m.reservedStock)} ${escapeHtml(m.unit)}</td>
-        <td data-label="Available">${escapeHtml(available)} ${escapeHtml(m.unit)}</td>
+        <td data-label="Available"><span class="${isLow ? 'low-stock-value' : ''}">${escapeHtml(available)} ${escapeHtml(m.unit)}${isLow ? ' ⚠' : ''}</span></td>
         <td data-label="Status"><span class="stamp ${(m.status || 'Active') === 'Active' ? 'stamp-active' : 'stamp-inactive'}">${escapeHtml(m.status || 'Active')}</span></td>
         ${isAdmin() ? `<td><button class="btn btn-ghost btn-sm mat-edit-btn" data-id="${escapeHtml(m.materialId)}">${svgIcon('edit')} Edit</button></td>` : ''}
       </tr>
@@ -1223,6 +1239,11 @@ function renderRequestDetailModal(detail) {
     const material = findMaterial(item.materialId);
     const name = material ? material.materialName : item.materialId;
     const canAct = canReviewRequests() && item.itemStatus === 'Pending' && request.currentStage === 'BTL Review';
+    const available = material
+      ? (material.availableStock !== undefined && material.availableStock !== ''
+          ? Number(material.availableStock)
+          : Number(material.currentStock || 0) - Number(material.reservedStock || 0))
+      : null;
     return `
       <tr data-item-id="${escapeHtml(item.itemId)}">
         <td data-label="Material">${escapeHtml(name)}</td>
@@ -1233,7 +1254,8 @@ function renderRequestDetailModal(detail) {
         <td data-label="Action">
           ${canAct ? `
             <div class="action-btns">
-              <input type="number" class="item-qty-input" placeholder="Approved qty" value="${escapeHtml(item.qtyRequested)}" title="Only used when approving">
+              ${available !== null ? `<span class="field-hint${available < Number(item.qtyRequested) ? ' field-hint-error' : ''}">${available} ${escapeHtml(material.unit || '')} available</span>` : ''}
+              <input type="number" class="item-qty-input" placeholder="Approved qty" value="${escapeHtml(item.qtyRequested)}" ${available !== null ? `max="${available}"` : ''} title="Only used when approving">
               <input type="text" class="item-remarks-input" placeholder="Remarks (required for reject/clarify)">
               <button class="btn btn-primary btn-sm item-approve-btn">Approve</button>
               <button class="btn btn-danger btn-sm item-reject-btn">Reject</button>
@@ -1334,6 +1356,16 @@ function bindRequestDetailActions(requestId, request, items) {
         toast('Add a remark before rejecting or requesting clarification.', 'error');
         if (remarksInput) remarksInput.focus();
         return;
+      }
+
+      if (decision === 'Approved' && qtyInput && qtyInput.max !== '') {
+        const qtyVal = Number(qtyInput.value);
+        const maxVal = Number(qtyInput.max);
+        if (qtyVal > maxVal) {
+          toast(`Only ${maxVal} available for this material.`, 'error');
+          qtyInput.focus();
+          return;
+        }
       }
 
       row.querySelectorAll('.action-btns button').forEach(b => b.disabled = true);
@@ -1713,7 +1745,10 @@ function addNewRequestItemRow(container) {
       <input type="hidden" class="nr-item-material-value">
       <div class="material-combo-panel hidden"></div>
     </div>
-    <input type="number" class="nr-item-qty" placeholder="Qty" min="1">
+    <div class="nr-item-qty-wrap">
+      <input type="number" class="nr-item-qty" placeholder="Qty" min="1">
+      <span class="field-hint nr-item-available"></span>
+    </div>
     <button type="button" class="item-row-remove" aria-label="Remove"><svg viewBox="0 0 24 24">TRASHICON</svg></button>
   `.replace('TRASHICON', ICONS.trash);
   row.querySelector('.item-row-remove').addEventListener('click', () => row.remove());
@@ -1741,8 +1776,13 @@ function renderMaterialComboOptions(panel, materials, activeIndex) {
     ${groups[cat].map(m => {
       const idx = flatIndex++;
       const isDuplicateName = nameCounts[m.materialName] > 1;
-      return `<div class="material-combo-option${idx === activeIndex ? ' active' : ''}" data-id="${escapeHtml(m.materialId)}" data-index="${idx}">
+      const available = (m.availableStock !== undefined && m.availableStock !== '')
+        ? Number(m.availableStock)
+        : Number(m.currentStock || 0) - Number(m.reservedStock || 0);
+      const isLow = available <= Number(m.reorderLevel || 0);
+      return `<div class="material-combo-option${idx === activeIndex ? ' active' : ''}" data-id="${escapeHtml(m.materialId)}" data-index="${idx}" data-available="${available}">
         ${escapeHtml(m.materialName)} <span class="material-combo-unit">(${escapeHtml(m.unit)})</span>${isDuplicateName ? ` <span class="material-combo-id">#${escapeHtml(m.materialId)}</span>` : ''}
+        <span class="material-combo-available${isLow ? ' low-stock-value' : ''}">${available} available</span>
       </div>`;
     }).join('')}
   `;
@@ -1791,17 +1831,41 @@ function bindMaterialCombo(row) {
     hiddenInput.value = materialId;
     searchInput.value = material ? `${material.materialName} (${material.unit})` : materialId;
     closePanel();
+    updateAvailableHint(optionEl.dataset.available !== undefined ? Number(optionEl.dataset.available) : null);
   }
+
+  const qtyInput = row.querySelector('.nr-item-qty');
+  const availableHint = row.querySelector('.nr-item-available');
+  let selectedAvailable = null;
+
+  function updateAvailableHint(available) {
+    selectedAvailable = available;
+    checkQtyAgainstAvailable();
+  }
+
+  function checkQtyAgainstAvailable() {
+    if (selectedAvailable === null) { availableHint.textContent = ''; return; }
+    const qty = Number(qtyInput.value || 0);
+    const overRequesting = qty > selectedAvailable;
+    availableHint.textContent = overRequesting
+      ? `Only ${selectedAvailable} currently in stock — request may need to wait for restock`
+      : `${selectedAvailable} available`;
+    availableHint.className = `field-hint nr-item-available${overRequesting ? ' field-hint-error' : ''}`;
+  }
+
+  qtyInput.addEventListener('input', checkQtyAgainstAvailable);
 
   categoryFilter.addEventListener('change', () => {
     hiddenInput.value = ''; // switching category invalidates whatever was previously selected
     searchInput.value = '';
+    updateAvailableHint(null);
     searchInput.focus();
     openPanel();
   });
   searchInput.addEventListener('focus', openPanel);
   searchInput.addEventListener('input', () => {
     hiddenInput.value = ''; // typing invalidates whatever was previously selected
+    updateAvailableHint(null);
     openPanel();
   });
   searchInput.addEventListener('keydown', (e) => {
