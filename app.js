@@ -1646,21 +1646,32 @@ function bindNewRequestForm() {
   const shopIdInput = document.getElementById('nrShopId');
   const statusEl = document.getElementById('nrShopIdStatus');
 
+  // Guards against overlapping lookups (Enter + blur firing in quick succession,
+  // or a user correcting the Shop ID before the first lookup resolves). Each call
+  // stamps its own token; when a call finishes, it only applies its result if it's
+  // still the most recent call in flight. Stale, late-resolving responses are
+  // discarded instead of silently overwriting newer/correct data.
+  let shopLookupToken = 0;
+
   async function runShopLookup() {
     const shopId = shopIdInput.value.trim();
     const errorEl = document.getElementById('nrError');
     errorEl.textContent = '';
     if (!shopId) { statusEl.textContent = ''; return; }
+
+    const token = ++shopLookupToken;
     statusEl.textContent = 'Looking up…';
     statusEl.className = 'field-hint';
     try {
       const shop = await Api.lookupShop(shopId);
+      if (token !== shopLookupToken) return; // a newer lookup has since started — discard this result
       document.getElementById('nrStoreName').value = shop.storeName || '';
       document.getElementById('nrRegion').value = shop.region || '';
       document.getElementById('nrRssName').value = shop.rssName || '';
       statusEl.textContent = 'Shop found ✓';
       statusEl.className = 'field-hint field-hint-success';
     } catch (err) {
+      if (token !== shopLookupToken) return; // a newer lookup has since started — discard this result
       document.getElementById('nrStoreName').value = '';
       document.getElementById('nrRegion').value = '';
       document.getElementById('nrRssName').value = '';
