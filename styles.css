@@ -336,6 +336,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .search-close { display: none; padding: 4px; color: var(--text-muted); flex-shrink: 0; }
 
 .mobile-menu-btn, .mobile-search-btn { display: none; }
+.mobile-menu-btn .icon-back { display: none; }
+.mobile-menu-btn.back-mode .icon-hamburger { display: none; }
+.mobile-menu-btn.back-mode .icon-back { display: block; }
+.mobile-menu-btn.back-mode { color: var(--accent-strong); }
 
 .topbar-actions { display: flex; align-items: center; gap: 14px; }
 
