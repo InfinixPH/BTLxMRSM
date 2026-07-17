@@ -170,6 +170,10 @@ function enterApp() {
       STATE = JSON.parse(cached);
     }
     renderView(currentView);
+    // Seed the root history entry so the very first popstate (native back gesture)
+    // has something sane to land on, instead of falling through to no state at all.
+    history.replaceState({ view: currentView, statusFilter: PENDING_REQUESTS_FILTER || null }, '', `#${currentView}`);
+    updateBackButtonVisibility();
 
     refreshBootstrap(cacheKey);
     startPolling(cacheKey);
@@ -327,7 +331,10 @@ function renderSidebarNav() {
 // Central place to switch views: keeps the sidebar's active state and the
 // mobile drawer in sync, so any "jump to another page" link (like the
 // Dashboard's "View all requests") behaves the same as clicking a nav item.
-function goToView(viewId, opts = {}) {
+// `navOpts.pushHistory` (default true) controls whether this switch adds a
+// browser history entry — set to false when replaying a state from popstate
+// (back/forward) so we don't create a duplicate/looping entry.
+function goToView(viewId, opts = {}, navOpts = {}) {
   currentView = viewId;
   document.querySelectorAll('#sidebarNav .nav-item').forEach(b => {
     b.classList.toggle('active', b.dataset.view === viewId);
@@ -336,7 +343,31 @@ function goToView(viewId, opts = {}) {
   PENDING_REQUESTS_FILTER = (viewId === 'requests' && opts.statusFilter) ? opts.statusFilter : null;
   renderView(viewId);
   if (window.innerWidth <= 860) closeMobileMenu();
+
+  if (navOpts.pushHistory !== false) {
+    history.pushState({ view: viewId, statusFilter: opts.statusFilter || null }, '', `#${viewId}`);
+  }
+  updateBackButtonVisibility();
 }
+
+function updateBackButtonVisibility() {
+  const btn = document.getElementById('mobileMenuBtn');
+  if (btn) btn.classList.toggle('back-mode', currentView !== 'dashboard');
+}
+
+// Makes the phone's native back gesture/button step through in-app views
+// instead of leaving the site — previously every view switch just swapped
+// DOM content with no history entry at all, so there was nothing to "go back" to.
+window.addEventListener('popstate', (e) => {
+  if (!SESSION) return; // not logged in yet — nothing to navigate
+  closeModal(); // a request-detail or other modal shouldn't linger over a different underlying view
+  const state = e.state;
+  if (state && state.view) {
+    goToView(state.view, { statusFilter: state.statusFilter }, { pushHistory: false });
+  } else {
+    goToView('dashboard', {}, { pushHistory: false });
+  }
+});
 
 function clearGlobalSearch() {
   GLOBAL_SEARCH = '';
@@ -388,6 +419,14 @@ function bindMobileMenu() {
   const btn = document.getElementById('mobileMenuBtn');
   if (!btn) return;
   btn.addEventListener('click', () => {
+    if (btn.classList.contains('back-mode')) {
+      // Real browser history.back() — popstate replays the previous view.
+      // Falls back to Dashboard if there's nowhere meaningful to go back to
+      // (e.g. the app was opened directly on a non-dashboard deep link).
+      if (history.state && history.state.view) history.back();
+      else goToView('dashboard');
+      return;
+    }
     document.getElementById('sidebar').classList.add('mobile-open');
     document.getElementById('sidebarBackdrop').classList.add('visible');
   });
