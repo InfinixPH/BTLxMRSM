@@ -513,7 +513,10 @@ function renderNotifications() {
         const n = list.find(x => x.notificationId === el.dataset.id);
         if (n) n.readStatus = 'Read';
         renderNotifications();
-        if (n && n.relatedRequestId) openRequestDetail(n.relatedRequestId);
+        if (n && n.relatedRequestId) {
+          document.getElementById('notifPanel').classList.add('hidden');
+          openRequestDetail(n.relatedRequestId);
+        }
       } catch (err) {
         toast(err.message, 'error');
       }
@@ -652,13 +655,15 @@ function viewDashboard() {
         <h3 style="font-size:14px;">Recent Requests</h3>
         ${total > 5 ? `<button class="btn btn-ghost btn-sm" id="dashViewAllBtn">View all</button>` : ''}
       </div>
-      ${renderRequestRows(STATE.requests.slice(-5).reverse())}
+      ${renderRequestRows(
+        STATE.requests.slice().sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)).slice(0, 5)
+      )}
     </div>
     ${lowStock.length ? `
       <div class="card low-stock-card" style="margin-top:20px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:14px;display:flex;align-items:center;gap:8px;">
-            <span class="low-stock-icon">${svgIcon('alertTriangle')}</span> Low Stock
+            <span class="low-stock-icon">${svgIcon('alertTriangle')}</span> Low Stock${lowStock.length > 5 ? ` (${lowStock.length})` : ''}
           </h3>
           <button class="btn btn-ghost btn-sm" id="dashLowStockBtn">View materials</button>
         </div>
@@ -835,7 +840,7 @@ async function loadPerformance() {
   const wrap = document.getElementById('performanceContent');
   try {
     const personnel = await Api.getPersonnel();
-    const reviewers = personnel.filter(p => p.position === ROLES.BTL_JB || p.position === ROLES.BTL_ETHAN);
+    const reviewers = personnel.filter(p => BTL_REVIEWER_ROLES.indexOf(p.position) !== -1);
     if (!reviewers.length) {
       wrap.innerHTML = `<p class="empty-state">No BTL reviewers found.</p>`;
       return;
@@ -2116,6 +2121,10 @@ function openUserModal(user) {
     };
     if (!payload.rssUserId || !payload.fullName) {
       errorEl.textContent = 'User ID and full name are required.';
+      return;
+    }
+    if (!isEdit && (USERS_CACHE || []).some(u => String(u.rssUserId).trim().toLowerCase() === payload.rssUserId.toLowerCase())) {
+      errorEl.textContent = `User ID "${payload.rssUserId}" is already in use.`;
       return;
     }
     try {
