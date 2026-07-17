@@ -43,6 +43,16 @@ const Api = {
     return all.filter(r => String(r.requestorUserId).trim() === target);
   },
 
+  /** True for roles allowed to see every request (Admin/BTL/Warehouse). Everyone else
+   *  (RSS/RSH/Others) only ever gets their own requests — and for those roles, requests
+   *  must be filtered server-side (Code.gs), not fetched in full and filtered in the
+   *  browser. Fetching-then-filtering means the complete REQUESTS sheet — every store's
+   *  purpose, reason, contact number, photo links — sits in that person's browser before
+   *  the filter ever runs, visible to anyone with dev tools open. */
+  _isPrivilegedRole(role) {
+    return role === ROLES.ADMIN || BTL_ROLES.indexOf(role) !== -1 || role === ROLES.WAREHOUSE;
+  },
+
   // ---- Auth (stays on Apps Script — PIN handling lives server-side only) ----
   login: (rssUserId, pin) => Api.post('login', { rssUserId, pin }),
   resetPin: (targetUserId, newPin, actorUserId) => Api.post('resetPin', { targetUserId, newPin, actorUserId }),
@@ -60,11 +70,27 @@ const Api = {
   getMaterials: () => SheetsClient.getObjects(SHEET_TABS.MATERIALS),
 
   async getRequests(role, userId) {
-    const all = await SheetsClient.getObjects(SHEET_TABS.REQUESTS);
-    return Api._filterRequestsForUser(all, role, userId);
+    // Non-privileged roles: filter server-side (Code.gs) so unfiltered rows never
+    // reach the browser. Privileged roles see everything anyway, so they keep the
+    // fast direct-Sheets path — no benefit to slowing them down.
+    if (!Api._isPrivilegedRole(role)) {
+      return Api.get('getRequests', { role, userId });
+    }
+    return SheetsClient.getObjects(SHEET_TABS.REQUESTS);
   },
 
   async getRequestDetail(requestId) {
+    const role = SESSION.role;
+    const userId = SESSION.userId;
+
+    // Non-privileged roles: let Code.gs enforce ownership server-side (it checks
+    // requestorUserId against the caller before returning anything). Otherwise a
+    // user who knows/guesses a requestId could pull another store's full detail
+    // directly, bypassing the list-level filter entirely.
+    if (!Api._isPrivilegedRole(role)) {
+      return Api.get('getRequestDetail', { requestId, role, userId });
+    }
+
     const data = await SheetsClient.batchGetObjects([
       SHEET_TABS.REQUESTS, SHEET_TABS.REQUEST_ITEMS, SHEET_TABS.REQUEST_TIMELINE
     ]);
@@ -92,6 +118,25 @@ const Api = {
    *  REQUEST_TIMELINE is included full (not per-request) so BTL Team Performance stats can be computed
    *  client-side without an extra round trip per request. */
   async getBootstrap(role, userId) {
+    // Non-privileged roles: MATERIALS/CONFIG carry no per-user data, so those stay on
+    // the fast direct-Sheets path. REQUESTS (and the notifications/timeline derived from
+    // it) go through Code.gs instead, so the full unfiltered table never reaches the
+    // browser — same reasoning as getRequests above.
+    if (!Api._isPrivilegedRole(role)) {
+      const [sheetsData, serverData] = await Promise.all([
+        SheetsClient.batchGetObjects([SHEET_TABS.MATERIALS, SHEET_TABS.CONFIG]),
+        Api.get('getBootstrap', { role, userId })
+      ]);
+      const lastUpdateRow = sheetsData[SHEET_TABS.CONFIG].find(r => r.key === 'LAST_DATA_UPDATE');
+      return {
+        materials: sheetsData[SHEET_TABS.MATERIALS],
+        requests: serverData.requests,
+        notifications: serverData.notifications,
+        timeline: serverData.timeline || [],
+        lastUpdate: lastUpdateRow ? lastUpdateRow.value : null
+      };
+    }
+
     const data = await SheetsClient.batchGetObjects([
       SHEET_TABS.MATERIALS, SHEET_TABS.REQUESTS, SHEET_TABS.NOTIFICATIONS,
       SHEET_TABS.CONFIG, SHEET_TABS.REQUEST_TIMELINE
