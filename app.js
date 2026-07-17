@@ -104,6 +104,14 @@ function bindThemeToggles() {
 // LOGIN / SESSION
 // ===================================================================
 
+// Failed-login throttling: not a substitute for server-side attempt tracking (which
+// doesn't exist yet), but stops the plain login form from being sat at and PIN-guessed
+// with zero friction. Resets on a successful login. Escalates so repeated abuse gets
+// slower, not just a fixed one-time delay.
+let loginFailCount = 0;
+let loginLockUntil = 0;
+let loginLockTimer = null;
+
 function bindLoginForm() {
   const form = document.getElementById('loginForm');
 
@@ -118,21 +126,57 @@ function bindLoginForm() {
     const btn = document.getElementById('loginBtn');
 
     errorEl.textContent = '';
+
+    const msLeft = loginLockUntil - Date.now();
+    if (msLeft > 0) {
+      startLoginCooldownDisplay(btn, errorEl);
+      return;
+    }
+
     btn.textContent = 'Logging in...';
     btn.disabled = true;
 
     try {
       const user = await Api.login(userId, pin);
+      loginFailCount = 0;
       SESSION = user;
       localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION, JSON.stringify(user));
       enterApp();
     } catch (err) {
-      errorEl.textContent = err.message;
-    } finally {
-      btn.textContent = 'Log In';
-      btn.disabled = false;
+      loginFailCount++;
+      if (loginFailCount >= 3) {
+        // 15s, 30s, 60s, 120s, capped at 300s — resets to 0 only on a successful login.
+        const cooldownSec = Math.min(15 * Math.pow(2, loginFailCount - 3), 300);
+        loginLockUntil = Date.now() + cooldownSec * 1000;
+        startLoginCooldownDisplay(btn, errorEl);
+      } else {
+        errorEl.textContent = err.message;
+        btn.textContent = 'Log In';
+        btn.disabled = false;
+      }
     }
   });
+}
+
+/** Disables the login button and counts down until loginLockUntil, showing the wait
+ *  time so it reads as "please slow down" rather than a silent/broken button. */
+function startLoginCooldownDisplay(btn, errorEl) {
+  clearInterval(loginLockTimer);
+  const tick = () => {
+    const secLeft = Math.ceil((loginLockUntil - Date.now()) / 1000);
+    if (secLeft <= 0) {
+      clearInterval(loginLockTimer);
+      btn.disabled = false;
+      btn.textContent = 'Log In';
+      errorEl.textContent = '';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = `Try again in ${secLeft}s`;
+    errorEl.textContent = 'Too many failed attempts. Please wait before trying again.';
+  };
+  tick();
+  loginLockTimer = setInterval(tick, 1000);
 }
 
 function logout() {
@@ -2075,13 +2119,29 @@ function viewUsersShell() {
       <div><span class="page-kicker">Team</span><h1 class="page-title">User Management</h1></div>
       <button class="btn btn-primary btn-sm" id="userAddBtn">+ Add User</button>
     </div>
+    <div class="toolbar">
+      <div class="toolbar-search">
+        <input id="userSearch" placeholder="Search by user ID, name, role, or region...">
+      </div>
+    </div>
     <div class="card table-wrap" id="usersTableWrap"><p class="empty-state">Loading...</p></div>
   `;
 }
 
+let USERS_QUERY = '';
+
 async function loadUsers() {
   const wrap = document.getElementById('usersTableWrap');
   document.getElementById('userAddBtn').addEventListener('click', () => openUserModal(null));
+  USERS_QUERY = '';
+  const search = document.getElementById('userSearch');
+  if (search) {
+    search.addEventListener('input', () => {
+      USERS_QUERY = search.value.trim().toLowerCase();
+      USERS_PAGE = 1;
+      renderUsersTable();
+    });
+  }
   try {
     USERS_CACHE = await Api.getPersonnel();
     USERS_PAGE = 1;
@@ -2094,12 +2154,18 @@ async function loadUsers() {
 function renderUsersTable() {
   const wrap = document.getElementById('usersTableWrap');
 
-  const totalUsers = USERS_CACHE.length;
+  const filtered = USERS_QUERY
+    ? USERS_CACHE.filter(u =>
+        [u.rssUserId, u.fullName, u.position, u.region].join(' ').toLowerCase().includes(USERS_QUERY)
+      )
+    : USERS_CACHE;
+
+  const totalUsers = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalUsers / USERS_PAGE_SIZE));
   USERS_PAGE = Math.min(USERS_PAGE, totalPages);
 
   const start = (USERS_PAGE - 1) * USERS_PAGE_SIZE;
-  const pageItems = USERS_CACHE.slice(start, start + USERS_PAGE_SIZE);
+  const pageItems = filtered.slice(start, start + USERS_PAGE_SIZE);
 
   const rows = pageItems.map(u => `
     <tr>
