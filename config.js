@@ -25,15 +25,20 @@ const CONFIG = {
 const ROLES = {
   ADMIN: 'ADMIN',
   BTL_MANAGER: 'BTL MANAGER',
-  BTL_ETHAN: 'BTL ETHAN',
-  BTL_JB: 'BTL JB',
+  BTL_ETHAN: 'BTL ETHAN', // legacy — kept so existing Users sheet rows for this person still work
+  BTL_JB: 'BTL JB',       // legacy — kept so existing Users sheet rows for this person still work
+  BTL_REVIEWER: 'BTL REVIEWER', // use this for any new reviewer going forward, no code change needed
   WAREHOUSE: 'WAREHOUSE',
   RSS: 'RSS',
   RSH: 'RSH',
   OTHERS: 'OTHERS'
 };
 
-const BTL_ROLES = [ROLES.BTL_MANAGER, ROLES.BTL_ETHAN, ROLES.BTL_JB];
+const BTL_ROLES = [ROLES.BTL_MANAGER, ROLES.BTL_ETHAN, ROLES.BTL_JB, ROLES.BTL_REVIEWER];
+
+/** Positions counted as "reviewers" on the Team Performance page. Manager is
+ *  intentionally excluded — they oversee but aren't in the item-review queue. */
+const BTL_REVIEWER_ROLES = [ROLES.BTL_ETHAN, ROLES.BTL_JB, ROLES.BTL_REVIEWER];
 
 /** Sidebar nav items per role. Each view id maps to a render function in app.js */
 const NAV_BY_ROLE = {
